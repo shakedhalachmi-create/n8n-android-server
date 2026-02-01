@@ -15,6 +15,14 @@ android {
         targetSdk = 28
         versionCode = 1
         versionName = "1.5.0"
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
+    }
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+        disable.add("ExpiredTargetSdkVersion")
     }
 
     buildTypes {

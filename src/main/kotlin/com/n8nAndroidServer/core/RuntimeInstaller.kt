@@ -82,8 +82,29 @@ object RuntimeInstaller {
         // 4. Set Permissions
         // chmod -R 755 runtimeDir
         try {
+            // General recursive chmod
             val chmodCmd = listOf("chmod", "-R", "755", runtimeDir.absolutePath)
             Runtime.getRuntime().exec(chmodCmd.toTypedArray()).waitFor()
+            
+            // Critical: Explicitly set +x for binaries via Kotlin File API
+            val binDir = File(runtimeDir, "bin")
+            val nodeFile = File(binDir, "node")
+            val startScript = File(binDir, "n8n-start.sh")
+
+            if (nodeFile.exists()) {
+                val success = nodeFile.setExecutable(true, false)
+                Log.i(TAG, "Permission Fix: node (+x) = $success")
+            }
+            if (startScript.exists()) {
+                val success = startScript.setExecutable(true, false)
+                Log.i(TAG, "Permission Fix: n8n-start.sh (+x) = $success")
+            }
+            
+            // Fallback: Targeted chmod for strict environments
+            // Sometimes standard File.setExecutable fails on internal storage mounts
+            Runtime.getRuntime().exec("chmod 755 ${nodeFile.absolutePath}").waitFor()
+            Runtime.getRuntime().exec("chmod 755 ${startScript.absolutePath}").waitFor()
+            
         } catch (e: Exception) {
             Log.w(TAG, "chmod warning: ${e.message}")
         }

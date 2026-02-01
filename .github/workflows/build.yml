@@ -52,7 +52,7 @@ jobs:
           path: |
             n8n-android-arm64.tar.gz
             metadata.json
-            app/build/outputs/apk/release/*.apk
+            **/build/outputs/apk/release/*.apk
           retention-days: 5
 
       - name: Create GitHub Release
@@ -62,7 +62,7 @@ jobs:
           files: |
             n8n-android-arm64.tar.gz
             metadata.json
-            app/build/outputs/apk/release/app-release-unsigned.apk
+            **/build/outputs/apk/release/*.apk
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           draft: false
