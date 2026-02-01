@@ -368,6 +368,13 @@ class ServerManager private constructor(
         env["TMPDIR"] = context.cacheDir.absolutePath
         env["N8N_SECURE_COOKIE"] = "false"
         
+        // Timezone Sync
+        val timeZone = java.util.TimeZone.getDefault().id
+        env["GENERIC_TIMEZONE"] = timeZone
+        
+        // Dynamic Dev Mode
+        env["NODE_ENV"] = if (isSmartUpdateEnabled.value) "development" else "production"
+
         return env
     }
     

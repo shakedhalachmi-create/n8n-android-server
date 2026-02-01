@@ -52,6 +52,12 @@ fun DashboardScreen(viewModel: DashboardViewModel = viewModel()) {
                 val allGranted = perms.values.all { it }
                 viewModel.onBluetoothPermissionResult(allGranted)
             }
+
+            val locationPermissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestPermission()
+            ) { isGranted ->
+                viewModel.onLocationPermissionResult(isGranted)
+            }
             
             ReliabilityCard(
                 viewModel = viewModel,
@@ -64,6 +70,9 @@ fun DashboardScreen(viewModel: DashboardViewModel = viewModel()) {
                             )
                         )
                     }
+                },
+                onRequestLocationPermission = {
+                    locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                 }
             )
             

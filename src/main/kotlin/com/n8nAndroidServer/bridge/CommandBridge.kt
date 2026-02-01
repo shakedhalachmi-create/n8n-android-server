@@ -98,14 +98,36 @@ object CommandBridge {
                 call.respondText("Vibrated for $duration ms", status = HttpStatusCode.OK)
             }
             "tap" -> {
-                val x = json.optDouble("x").toFloat()
-                val y = json.optDouble("y").toFloat()
+                val xRaw = json.opt("x")
+                val yRaw = json.opt("y")
+                
+                val displayMetrics = context.resources.displayMetrics
+                val screenWidth = displayMetrics.widthPixels
+                val screenHeight = displayMetrics.heightPixels
+
+                fun resolveCoordinate(raw: Any?, max: Int): Float {
+                    return when (raw) {
+                        is String -> {
+                            if (raw.endsWith("%")) {
+                                val pct = raw.removeSuffix("%").toDoubleOrNull() ?: 0.0
+                                (pct / 100.0 * max).toFloat()
+                            } else {
+                                raw.toFloatOrNull() ?: 0f
+                            }
+                        }
+                        is Number -> raw.toFloat()
+                        else -> 0f
+                    }
+                }
+
+                val x = resolveCoordinate(xRaw, screenWidth)
+                val y = resolveCoordinate(yRaw, screenHeight)
 
                 val service = com.n8nAndroidServer.services.N8nAccessibilityService.instance
                 if (service != null) {
                     val success = service.performTap(x, y)
                     if (success) {
-                        call.respondText("Tap initiated at $x, $y", status = HttpStatusCode.OK)
+                        call.respondText("Tap initiated at $x, $y (Screen: ${screenWidth}x${screenHeight})", status = HttpStatusCode.OK)
                     } else {
                         call.respondText("Tap failed (gesture dispatch error)", status = HttpStatusCode.InternalServerError)
                     }

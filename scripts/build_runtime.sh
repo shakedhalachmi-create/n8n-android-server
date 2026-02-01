@@ -476,6 +476,7 @@ export OPENSSL_CONF=\$RUNTIME_ROOT/etc/tls/openssl.cnf
 export N8N_RUNNERS_DISABLED=true
 # Fallback TMPDIR if not set by app
 export TMPDIR=\${TMPDIR:-\$N8N_USER_FOLDER/../../cache}
+export NODE_ENV=\${NODE_ENV:-production}
 
 # CRITICAL: Robust LD_LIBRARY_PATH relative to runtime root
 export LD_LIBRARY_PATH=\$RUNTIME_ROOT/lib:\$LD_LIBRARY_PATH

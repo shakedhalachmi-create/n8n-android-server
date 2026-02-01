@@ -182,7 +182,7 @@ private fun getButtonText(state: ServerState): String {
         ServerState.STOPPING -> "STOPPING..."
         ServerState.RETRYING -> "RETRYING..."
         ServerState.FATAL_ERROR -> "RETRY"
-        ServerState.ERROR_MISSING_RUNTIME -> "DOWNLOAD FROM INTERNET"
+        ServerState.ERROR_MISSING_RUNTIME -> "RETRY START" // Unified action
         ServerState.VERIFYING_CACHE -> "CHECKING..."
         ServerState.INSTALLING -> "INSTALLING..."
     }
@@ -209,7 +209,7 @@ private fun isBusyState(state: ServerState): Boolean {
 
 private fun handleButtonClick(viewModel: DashboardViewModel, state: ServerState) {
     when (state) {
-        ServerState.ERROR_MISSING_RUNTIME -> viewModel.checkAndInstallRuntime()
+        ServerState.ERROR_MISSING_RUNTIME -> viewModel.toggleServer() // Logic is now in startServer
         ServerState.RUNNING -> viewModel.toggleServer()
         ServerState.STOPPED, ServerState.FATAL_ERROR -> viewModel.toggleServer()
         else -> { /* Do nothing for transitioning states */ }

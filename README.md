@@ -61,43 +61,102 @@ The API expects a JSON payload defining the target category, action, and optiona
 }
 ```
 
-### Examples
+### Supported Actions
 
-#### 1. Media Playback (Spotify Control)
-Trigger media actions like Play/Pause or Next Track.
+#### 1. Hardware Control
+**Flashlight:**
+```json
+{ "category": "flashlight", "action": "on" }
+```
+*(Actions: `on`, `off`)*
+
+**Volume:**
+Set volume for `music`, `ring`, `alarm`, or `notification`.
 ```json
 {
-  "category": "media",
-  "action": "control",
-  "params": {
-    "command": "next",
-    "package": "com.spotify.music"
-  }
+  "category": "volume", 
+  "action": "set", 
+  "params": { "stream": "music", "level": "10" } 
 }
 ```
 
-#### 2. Bluetooth Connectivity
-Connect to a known Bluetooth device.
+**Display Brightness:**
+Requires 'Write Settings' permission (Grant in App > Reliability Card).
 ```json
 {
-  "category": "connectivity",
-  "action": "bluetooth_connect",
-  "params": {
-    "device_name": "RX-V381 YamahX",
-    "mac_address": "00:00:00:00:00:00"
-  }
+  "category": "display", 
+  "action": "set_brightness", 
+  "params": { "level": "200" } 
+}
+```
+*(Range: 0-255. Use action `auto_brightness` to reset)*
+
+**Wi-Fi Control:**
+```json
+{ "category": "wifi", "action": "on" }
+```
+*(Actions: `on`, `off`, `scan`, `connect`, `status`)*
+
+**Connect Example:**
+```json
+{
+  "category": "wifi",
+  "action": "connect",
+  "params": { "ssid": "MyNetwork", "password": "secretpassword" }
 }
 ```
 
-#### 3. Launching an Application
+**Battery:**
+Get level, health, and charging status.
+```json
+{ "category": "battery", "action": "get_status" }
+```
+
+#### 2. UI & System Automation
+**Global Actions:**
+(Requires Accessibility Service)
+```json
+{ "category": "ui", "action": "home" }
+```
+*(Actions: `home`, `back`, `recents`, `notifications`, `lock`)*
+
+**Clipboard:**
+```json
+{ "category": "clipboard", "action": "set", "params": { "text": "Copied from n8n" } }
+```
+```json
+{ "category": "clipboard", "action": "get" }
+```
+
+**Feedback:**
+Show a toast message.
+```json
+{ "category": "feedback", "action": "toast", "params": { "text": "Workflow Completed" } }
+```
+
+#### 3. Bluetooth
+**Control:**
+```json
+{ "category": "bluetooth", "action": "on" }
+```
+*(Actions: `on`, `off`, `scan`, `connect`)*
+
+**Connect Example:**
+```json
+{
+  "category": "bluetooth",
+  "action": "connect",
+  "params": { "target": "Device Name" }
+}
+```
+
+#### 4. Application Launching
 Launch any installed app using its package name.
 ```json
 {
   "category": "app",
   "action": "launch",
-  "params": {
-    "package_name": "com.twitter.android"
-  }
+  "params": { "package_name": "com.twitter.android" }
 }
 ```
 
@@ -122,6 +181,9 @@ Trigger device vibration.
 
 #### 2. Screen Tap
 Simulate a touch interaction (Requires Accessibility Service enabled).
+Coordinates can be absolute pixels or percentages of screen size (e.g., `"50%"`).
+
+**Pixel Example:**
 ```json
 {
   "command": "tap",
@@ -130,13 +192,27 @@ Simulate a touch interaction (Requires Accessibility Service enabled).
 }
 ```
 
+**Percentage Example:**
+```json
+{
+  "command": "tap",
+  "x": "50%",
+  "y": "80%"
+}
+```
+
 #### 3. Raw Intent
-Launch an Android Intent directly.
+Launch an Android Intent directly. Supports detailed parameters including `class`, `type`, and `extras`.
 ```json
 {
   "action": "android.intent.action.VIEW",
   "data": "https://n8n.io",
-  "package": "com.android.chrome"
+  "package": "com.android.chrome",
+  "type": "text/html",
+  "extras": {
+    "some_key": "some_value",
+    "is_premium": true
+  }
 }
 ```
 

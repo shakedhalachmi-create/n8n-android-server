@@ -63,6 +63,14 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val _hasBluetoothPermission = MutableStateFlow(true)
     val hasBluetoothPermission: StateFlow<Boolean> = _hasBluetoothPermission.asStateFlow()
 
+    // Location Permission State (Required for Wi-Fi Scan)
+    private val _hasLocationPermission = MutableStateFlow(true)
+    val hasLocationPermission: StateFlow<Boolean> = _hasLocationPermission.asStateFlow()
+
+    // Developer Mode State
+    private val _isDevModeEnabled = MutableStateFlow(false)
+    val isDevModeEnabled: StateFlow<Boolean> = _isDevModeEnabled.asStateFlow()
+
     init {
         // Ensure Database Singleton is initialized early
         WhitelistDatabase.getInstance(application)
@@ -84,11 +92,12 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 readLogs()
                 
                 // Poll Battery
-                // Poll Battery
                 checkBatteryOptimization()
                 checkOverlayPermission()
                 checkAccessibilityService()
                 checkBluetoothPermission()
+                checkLocationPermission()
+                checkDevMode()
 
                 delay(2000) // 2 seconds poll interval
             }
@@ -294,11 +303,35 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         _hasBluetoothPermission.value = granted
     }
     
+    // Check Location Permission
+    private fun checkLocationPermission() {
+        val context = getApplication<Application>()
+        val location = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)
+        _hasLocationPermission.value = (location == android.content.pm.PackageManager.PERMISSION_GRANTED)
+    }
+
+    fun onLocationPermissionResult(granted: Boolean) {
+        _hasLocationPermission.value = granted
+    }
+    
     fun openAccessibilitySettings() {
         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         getApplication<Application>().startActivity(intent)
+    }
+
+    private fun checkDevMode() {
+        val context = getApplication<Application>()
+        val devMode = try {
+            Settings.Global.getInt(
+                context.contentResolver,
+                Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0
+            )
+        } catch (e: Exception) {
+            0
+        }
+        _isDevModeEnabled.value = (devMode == 1)
     }
 
 

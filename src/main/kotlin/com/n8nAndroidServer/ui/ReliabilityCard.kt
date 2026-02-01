@@ -11,6 +11,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.ui.graphics.Color
 
 /**
  * Reliability Card - Battery optimization status and phantom process fix.
@@ -18,152 +22,142 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ReliabilityCard(
     viewModel: DashboardViewModel,
-    onRequestBluetoothPermission: () -> Unit = {}
+    onRequestBluetoothPermission: () -> Unit = {},
+    onRequestLocationPermission: () -> Unit = {}
 ) {
     val isBatteryOptimized by viewModel.isBatteryOptimized.collectAsState()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     
+    // Check Developer Mode status (Reactive)
+    val isDevModeEnabled by viewModel.isDevModeEnabled.collectAsState()
+    // Check App Developer Mode (Smart Update)
+    val isAppDevMode by viewModel.isSmartUpdateEnabled.collectAsState()
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (isBatteryOptimized) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.errorContainer
-            }
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "RELIABILITY WIZARD",
+                text = "RELIABILITY & PERMISSIONS",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // Bluetooth Permission Check
+            // 1. Battery Optimization
+            PermissionRequirementCard(
+                title = "Battery Optimization",
+                isGranted = isBatteryOptimized,
+                iconGranted = "✅",
+                iconMissing = "⚠️",
+                description = "Prevents Android from killing the server during sleep.",
+                commands = listOf("Run in background", "24/7 Availability"),
+                onGrant = { viewModel.requestBatteryOptimization() },
+                grantText = "Disable Optimization"
+            )
+            
+            HorizontalDivider()
+
+            // 2. Bluetooth Permission
             val hasBluetoothPermission by viewModel.hasBluetoothPermission.collectAsState()
+            PermissionRequirementCard(
+                title = "Bluetooth Access",
+                isGranted = hasBluetoothPermission,
+                iconGranted = "✅",
+                iconMissing = "🔐",
+                description = "Required to scan and connect to Bluetooth devices.",
+                commands = listOf("bluetooth.scan", "bluetooth.connect"),
+                onGrant = onRequestBluetoothPermission,
+                grantText = "Grant Bluetooth"
+            )
+
+            HorizontalDivider()
             
-            if (!hasBluetoothPermission) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "🔐",
-                        style = MaterialTheme.typography.headlineMedium
-                    )
-                    Column {
-                        Text(
-                            text = "Permission Missing",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Text(
-                            text = "App needs Bluetooth Connect/Scan to control stereo.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-                
-                Button(
-                    onClick = onRequestBluetoothPermission,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Grant Bluetooth Permission")
-                }
-                
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
-            }
+            // 2.5 Location Permission (Wi-Fi Scan)
+            val hasLocationPermission by viewModel.hasLocationPermission.collectAsState()
+            PermissionRequirementCard(
+                title = "Location Access",
+                isGranted = hasLocationPermission,
+                iconGranted = "✅",
+                iconMissing = "📍",
+                description = "Required for Wi-Fi Scanning (Android Requirement).",
+                commands = listOf("wifi.scan", "connectivity.scan"),
+                onGrant = onRequestLocationPermission,
+                grantText = "Grant Location"
+            )
+
+            HorizontalDivider()
             
-            // Battery Optimization Status
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = if (isBatteryOptimized) "✅" else "⚠️",
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                Column {
-                    Text(
-                        text = if (isBatteryOptimized) {
-                            "High Reliability (Battery Opt Disabled)"
-                        } else {
-                            "Warning: Battery Optimization Enabled"
-                        },
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (isBatteryOptimized) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        }
-                    )
-                    
-                    if (!isBatteryOptimized) {
-                        Text(
-                            text = "Server may be killed during sleep",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
-            
-            // Battery Optimization Button
-            if (!isBatteryOptimized) {
-                Button(
-                    onClick = { viewModel.requestBatteryOptimization() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Disable Battery Optimization")
-                }
-            }
-            
-            // Overlay Permission Check
+            // 3. Overlay Permission
             val hasOverlayPermission by viewModel.hasOverlayPermission.collectAsState()
+            PermissionRequirementCard(
+                title = "Display Over Apps",
+                isGranted = hasOverlayPermission,
+                iconGranted = "✅",
+                iconMissing = "⚠️",
+                description = "Allows starting activities from the background.",
+                commands = listOf("app.launch", "reliability"),
+                onGrant = { viewModel.requestOverlayPermission() },
+                grantText = "Grant Overlay"
+            )
+
+            HorizontalDivider()
+
+             // 4. Accessibility Service
+            val isAccessibilityEnabled by viewModel.isAccessibilityEnabled.collectAsState()
+            PermissionRequirementCard(
+                title = "Accessibility Service",
+                isGranted = isAccessibilityEnabled,
+                iconGranted = "✅",
+                iconMissing = "🛠️",
+                description = "Enables UI automation and global actions.",
+                commands = listOf("ui.home", "ui.back", "ui.recents", "ui.notifications"),
+                onGrant = { viewModel.openAccessibilitySettings() },
+                grantText = "Enable Service"
+            )
+
+            HorizontalDivider()
             
-            if (!hasOverlayPermission) {
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
-                
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "⚠️",
-                        style = MaterialTheme.typography.headlineMedium
-                    )
-                    Column {
-                        Text(
-                            text = "Warning: Background Starts Restricted",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Text(
-                            text = "App needs 'Display over other apps' to start Execute Command reliably from background.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
+            // 5. Write Settings
+            val hasWriteSettings = remember(context) { Settings.System.canWrite(context) }
+            PermissionRequirementCard(
+                title = "Modify System Settings",
+                isGranted = hasWriteSettings,
+                iconGranted = "✅",
+                iconMissing = "⚙️",
+                description = "Required to change system display settings.",
+                commands = listOf("display.set_brightness", "display.auto_brightness"),
+                onGrant = {
+                    val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS).apply {
+                       data = Uri.parse("package:${context.packageName}")
+                       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     }
-                }
-                
-                Button(
-                    onClick = { viewModel.requestOverlayPermission() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Grant Overlay Permission")
-                }
-            }
-            
-            // Phantom Process Fix (Android 12+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                    context.startActivity(intent)
+                },
+                grantText = "Grant Write Settings"
+            )
+
+            // 6. Phantom Process Fix (ADB) - Only if BOTH Developer Modes are ON
+            if (isDevModeEnabled && isAppDevMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                HorizontalDivider()
                 
                 Text(
-                    text = "PHANTOM PROCESS KILLER FIX (ADB)",
-                    style = MaterialTheme.typography.labelMedium,
+                    text = "ADVANCED: PHANTOM PROCESS FIX",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error
+                )
+                
+                Text(
+                    text = "Android 12+ may kill child processes (like node) consuming too much CPU. Run this via ADB to disable it.",
+                    style = MaterialTheme.typography.bodySmall
                 )
                 
                 val adbCommand = "adb shell device_config put activity_manager max_phantom_processes 2147483647"
@@ -173,7 +167,10 @@ fun ReliabilityCard(
                         text = adbCommand,
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(vertical = 4.dp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
                     )
                 }
                 
@@ -181,50 +178,87 @@ fun ReliabilityCard(
                     onClick = {
                         clipboardManager.setText(AnnotatedString(adbCommand))
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    )
                 ) {
                     Text("Copy ADB Command")
                 }
-                
+            }
+        }
+    }
+}
+
+@Composable
+fun PermissionRequirementCard(
+    title: String,
+    isGranted: Boolean,
+    iconGranted: String,
+    iconMissing: String,
+    description: String,
+    commands: List<String>,
+    onGrant: () -> Unit,
+    grantText: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Icon Column
+        Text(
+            text = if (isGranted) iconGranted else iconMissing,
+            style = MaterialTheme.typography.headlineMedium
+        )
+        
+        // Content Column
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            // Header
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = if (isGranted) 
+                    MaterialTheme.colorScheme.primary 
+                else 
+                    MaterialTheme.colorScheme.error
+            )
+            
+            // Description
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            
+            // Enabled Features / Commands
+            if (commands.isNotEmpty()) {
                 Text(
-                    text = "Run this on your computer while phone is connected via USB",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Enables: ${commands.joinToString(", ")}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary
                 )
             }
             
-             // Accessibility Service Check
-            val isAccessibilityEnabled by viewModel.isAccessibilityEnabled.collectAsState()
-            
-            if (!isAccessibilityEnabled) {
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
-                
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "🛠️",
-                        style = MaterialTheme.typography.headlineMedium
-                    )
-                    Column {
-                        Text(
-                            text = "Native Control Disabled",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Text(
-                            text = "Enable n8n android server Accessibility Service to allow taps and gestures.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-                
+            // Grant Button (Only if not granted)
+            if (!isGranted) {
+                Spacer(modifier = Modifier.height(4.dp))
                 Button(
-                    onClick = { viewModel.openAccessibilitySettings() },
-                    modifier = Modifier.fillMaxWidth()
+                    onClick = onGrant,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Text("Enable Native Control")
+                    Text(grantText)
                 }
+            } else {
+                 Text(
+                    text = "Active & Ready",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                 )
             }
         }
     }

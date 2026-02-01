@@ -122,19 +122,28 @@ class GatekeeperProxy(private val context: Context) {
             val response: HttpResponse = httpClient.request(backendUrl) {
                 method = call.request.httpMethod
                 
-                // Copy headers
+                // Copy headers (Case-insensitive filtering)
                 call.request.headers.forEach { name, values ->
-                    if (name !in listOf("Host", "Connection")) {
-                        values.forEach { value ->
-                            header(name, value)
-                        }
+                    if (name.equals("Host", ignoreCase = true) || 
+                        name.equals("Connection", ignoreCase = true) || 
+                        name.equals("Origin", ignoreCase = true)) {
+                        return@forEach
+                    }
+                    values.forEach { value ->
+                        header(name, value)
                     }
                 }
                 
-                // Inject forwarding headers
-                header("X-Forwarded-For", remoteIp)
-                header("X-Forwarded-Proto", call.request.local.scheme)
-                header("X-Forwarded-Host", call.request.host())
+                // Inject forwarding headers (Spoofed to Localhost)
+                header("X-Forwarded-For", remoteIp) 
+                header("X-Forwarded-Proto", "http") // Force http
+                header("X-Forwarded-Host", "$BACKEND_HOST:$BACKEND_PORT") // Spoof Host
+                header("Host", "$BACKEND_HOST:$BACKEND_PORT")
+                
+                // Rewrite Origin
+                val newOrigin = "http://$BACKEND_HOST:$BACKEND_PORT"
+                Log.d(TAG, "🔄 Rewriting Origin: ${call.request.headers["Origin"]} -> $newOrigin")
+                header("Origin", newOrigin)
                 
                 // Copy body if present
                 val requestBody = call.receiveNullable<ByteArray>()
@@ -195,17 +204,30 @@ class GatekeeperProxy(private val context: Context) {
                 // Copy headers from client request
                 val clientHeaders = session.call.request.headers
                 clientHeaders.names().forEach { name ->
-                    if (name !in listOf("Host", "Connection", "Upgrade", "Sec-WebSocket-Key", "Sec-WebSocket-Version", "Sec-WebSocket-Extensions", "Sec-WebSocket-Accept")) {
+                    val ignored = listOf(
+                        "Host", "Connection", "Upgrade", 
+                        "Sec-WebSocket-Key", "Sec-WebSocket-Version", 
+                        "Sec-WebSocket-Extensions", "Sec-WebSocket-Accept", 
+                        "Origin"
+                    )
+                    
+                    if (ignored.none { it.equals(name, ignoreCase = true) }) {
                         clientHeaders.getAll(name)?.forEach { value ->
                             header(name, value)
                         }
                     }
                 }
                 
-                // Add Forwarding Headers
+                // Add Forwarding Headers (Spoofed)
                 header("X-Forwarded-For", remoteIp)
-                header("X-Forwarded-Proto", session.call.request.local.scheme)
-                header("X-Forwarded-Host", session.call.request.host())
+                header("X-Forwarded-Proto", "http")
+                header("X-Forwarded-Host", "$BACKEND_HOST:$BACKEND_PORT")
+                header("Host", "$BACKEND_HOST:$BACKEND_PORT")
+                
+                // Rewrite Origin
+                val newOrigin = "http://$BACKEND_HOST:$BACKEND_PORT"
+                Log.d(TAG, "🔄 WS Origin Rewrite: $newOrigin")
+                header("Origin", newOrigin)
             }) {
                 val backendSession = this
                 Log.i(TAG, "🔌 Tunnel Established: Client <-> Backend ($requestPath)")
