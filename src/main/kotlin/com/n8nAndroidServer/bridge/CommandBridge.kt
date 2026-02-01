@@ -209,21 +209,26 @@ object CommandBridge {
             val dispatcher = systemDispatcher
             if (dispatcher != null) {
                 val result = dispatcher.execute(request)
-                // Manual JSON construction to avoid adding Serialization dependency complexity right now if not present,
-                // but SystemResult is generic enough.
+                Log.d(TAG, "System Execute Result: success=${result.success}, message=${result.message}")
+                
+                val statusCode = if (result.success) {
+                    HttpStatusCode.OK
+                } else if (result.message.contains("Permission", ignoreCase = true)) {
+                    HttpStatusCode.Forbidden
+                } else if (result.message.contains("Accessibility", ignoreCase = true)) {
+                    HttpStatusCode.ServiceUnavailable
+                } else {
+                    HttpStatusCode.InternalServerError
+                }
+
                 call.respondText(
-                    "{\"success\": ${result.success}, \"message\": \"${result.message}\"}",
+                    "{\"success\": ${result.success}, \"message\": \"${result.message.replace("\"", "\\\"")}\"}",
                     contentType = ContentType.Application.Json,
-                    status = if (result.success) {
-                        HttpStatusCode.OK
-                    } else if (result.message.contains("Permission", ignoreCase = true)) {
-                        HttpStatusCode.Forbidden
-                    } else {
-                        HttpStatusCode.InternalServerError
-                    }
+                    status = statusCode
                 )
             } else {
-                call.respondText("System Dispatcher not initialized", status = HttpStatusCode.InternalServerError)
+                Log.e(TAG, "System Dispatcher not initialized")
+                call.respondText("{\"success\": false, \"message\": \"System Dispatcher not initialized\"}", status = HttpStatusCode.InternalServerError)
             }
             
         } catch (e: Exception) {

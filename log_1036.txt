@@ -1,0 +1,27 @@
+--------- beginning of main
+02-01 12:09:04.052  1036  1036 I 8nAndroidServe: Late-enabling -Xcheck:jni
+02-01 12:09:04.091  1036  1036 E USNET   : USNET: appName: com.n8nAndroidServer
+02-01 12:09:04.094  1036  1036 D ProcessState: Binder ioctl to enable oneway spam detection failed: Invalid argument
+02-01 12:09:04.105  1036  1036 D ActivityThread: setConscryptValidator
+02-01 12:09:04.105  1036  1036 D ActivityThread: setConscryptValidator - put
+--------- beginning of system
+02-01 12:09:04.150  1036  1036 D ActivityThread: handleBindApplication()++ app=com.n8nAndroidServer
+02-01 12:09:04.161  1036  1036 D CompatibilityChangeReporter: Compat change id reported: 171979766; UID 10514; state: DISABLED
+02-01 12:09:04.293  1036  1036 D ApplicationLoaders: Returning zygote-cached class loader: /system/framework/android.test.base.jar
+02-01 12:09:05.346  1036  1036 V GraphicsEnvironment: ANGLE Developer option for 'com.n8nAndroidServer' set to: 'default'
+02-01 12:09:05.346  1036  1036 V GraphicsEnvironment: App is not on the allowlist for updatable production driver.
+02-01 12:09:05.353  1036  1036 D LoadedApk: LoadedApk::makeApplication() appContext.mOpPackageName=com.n8nAndroidServer appContext.mBasePackageName=com.n8nAndroidServer
+02-01 12:09:05.353  1036  1036 D NetworkSecurityConfig: No Network Security Config specified, using platform default
+02-01 12:09:05.406  1036  1036 D NetworkSecurityConfig: No Network Security Config specified, using platform default
+02-01 12:09:05.470  1036  1036 D ActivityThread: handleBindApplication() --
+02-01 12:09:05.496  1036  1380 D OpenGLRenderer: RenderThread::requireGlContext()
+02-01 12:09:05.551  1036  1380 D OpenGLRenderer: RenderThread::setGrContext()
+02-01 12:09:05.632  1036  1036 I DecorView: [INFO] isPopOver=false, config=true
+02-01 12:09:05.632  1036  1036 I DecorView: updateCaptionType >> DecorView@c783a6e[], isFloating=false, isApplication=true, hasWindowControllerCallback=true, hasWindowDecorCaption=false
+02-01 12:09:05.633  1036  1036 D DecorView: setCaptionType = 0, this = DecorView@c783a6e[]
+02-01 12:09:05.645  1036  1036 I DecorView: getCurrentDensityDpi: from real metrics. densityDpi=480 msg=resources_loaded
+02-01 12:09:05.798  1036  1036 I ViewRootImpl@32b1ca3[MainActivity]: setView = com.android.internal.policy.DecorView@c783a6e TM=true
+02-01 12:09:05.813  1036  1036 I ViewRootImpl@32b1ca3[MainActivity]: stopped(true) old=false
+02-01 12:09:06.786  1036  1036 I ViewRootImpl@32b1ca3[MainActivity]: Relayout returned: old=(0,0,1080,2280) new=(0,0,1080,2280) req=(0,0)8 dur=14 res=0x1 s={false 0} ch=false fn=-1
+02-01 12:09:06.788  1036  1036 I Choreographer: Skipped 45 frames!  The application may be doing too much work on its main thread.
+02-01 12:09:10.877  1036  1413 D ProfileInstaller: Installing profile for com.n8nAndroidServer

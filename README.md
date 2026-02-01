@@ -80,16 +80,21 @@ Set volume for `music`, `ring`, `alarm`, or `notification`.
 }
 ```
 
-**Display Brightness:**
-Requires 'Write Settings' permission (Grant in App > Reliability Card).
+**Screen:**
+Control screen state (Wake/Lock).
 ```json
-{
-  "category": "display", 
-  "action": "set_brightness", 
-  "params": { "level": "200" } 
-}
+{ "category": "screen", "action": "on" }
 ```
-*(Range: 0-255. Use action `auto_brightness` to reset)*
+*(Actions: `on`, `off`, `status`)*
+*(Note: `off` requires **Accessibility Service** enabled)*
+
+**Brightness:**
+Control screen brightness.
+```json
+{ "category": "brightness", "action": "200" }
+```
+*(Actions: `[0-255]`, `auto`, `status`)*
+*(Legacy support: `set` with params)*
 
 **Wi-Fi Control:**
 ```json

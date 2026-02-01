@@ -26,7 +26,7 @@ fun ServerControlCard(viewModel: DashboardViewModel) {
     val containerColor = when (serverState) {
         ServerState.FATAL_ERROR -> MaterialTheme.colorScheme.errorContainer
         ServerState.RUNNING -> MaterialTheme.colorScheme.primaryContainer
-        ServerState.VERIFYING_CACHE, ServerState.INSTALLING -> MaterialTheme.colorScheme.surfaceVariant
+        ServerState.VERIFYING_CACHE, ServerState.INSTALLING, ServerState.DOWNLOADING -> MaterialTheme.colorScheme.surfaceVariant
         else -> MaterialTheme.colorScheme.surface
     }
 
@@ -70,23 +70,28 @@ fun ServerControlCard(viewModel: DashboardViewModel) {
             // Show if downloading OR installing
             val showProgress = (downloadProgress > 0f && downloadProgress < 1f) || 
                                serverState == ServerState.INSTALLING ||
-                               serverState == ServerState.VERIFYING_CACHE
+                               serverState == ServerState.VERIFYING_CACHE ||
+                               serverState == ServerState.DOWNLOADING
             
             AnimatedVisibility(visible = showProgress) {
                 Column {
                     if (serverState == ServerState.VERIFYING_CACHE) {
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) // Indeterminate
-                    } else {
+                    } else if (serverState == ServerState.DOWNLOADING) {
                         LinearProgressIndicator(
-                            progress = { if (serverState == ServerState.INSTALLING) 1f else downloadProgress },
+                            progress = { downloadProgress },
                             modifier = Modifier.fillMaxWidth()
                         )
+                    } else {
+                         // INSTALLING or others
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) // Indeterminate for extract
                     }
                     
                     val progressText = when(serverState) {
                         ServerState.VERIFYING_CACHE -> "Checking Local Cache..."
-                        ServerState.INSTALLING -> "Installing from Local Cache..."
-                        else -> "Downloading from Internet: ${(downloadProgress * 100).toInt()}%"
+                        ServerState.DOWNLOADING -> "Downloading Runtime: ${(downloadProgress * 100).toInt()}%"
+                        ServerState.INSTALLING -> "Extracting & Installing..."
+                        else -> "Processing..."
                     }
                     
                     Text(
@@ -143,7 +148,7 @@ private fun StatusIndicator(state: ServerState) {
         ServerState.RUNNING -> MaterialTheme.colorScheme.primary
         ServerState.FATAL_ERROR -> MaterialTheme.colorScheme.error
         ServerState.STARTING, ServerState.STOPPING, ServerState.RETRYING, 
-        ServerState.VERIFYING_CACHE, ServerState.INSTALLING -> MaterialTheme.colorScheme.tertiary
+        ServerState.VERIFYING_CACHE, ServerState.INSTALLING, ServerState.DOWNLOADING -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     
@@ -163,27 +168,28 @@ private fun StatusIndicator(state: ServerState) {
 private fun getStatusText(state: ServerState): String {
     return when (state) {
         ServerState.STOPPED -> "Stopped"
+        ServerState.NOT_INSTALLED -> "Not Installed"
         ServerState.STARTING -> "Starting..."
-        ServerState.RUNNING -> "Running"
+        ServerState.RUNNING -> "Running" // Wait for port open
         ServerState.STOPPING -> "Stopping..."
         ServerState.RETRYING -> "Retrying..."
-        ServerState.FATAL_ERROR -> "FATAL_ERROR"
-        ServerState.ERROR_MISSING_RUNTIME -> "Runtime Missing"
+        ServerState.FATAL_ERROR -> "Fatal Error"
         ServerState.VERIFYING_CACHE -> "Checking Cache"
-        ServerState.INSTALLING -> "Installing"
+        ServerState.DOWNLOADING -> "Downloading..."
+        ServerState.INSTALLING -> "Installing..."
     }
 }
 
 private fun getButtonText(state: ServerState): String {
     return when (state) {
-        ServerState.STOPPED -> "START SERVER"
+        ServerState.STOPPED, ServerState.NOT_INSTALLED -> "START SERVER"
         ServerState.STARTING -> "STARTING..."
         ServerState.RUNNING -> "STOP SERVER"
         ServerState.STOPPING -> "STOPPING..."
         ServerState.RETRYING -> "RETRYING..."
         ServerState.FATAL_ERROR -> "RETRY"
-        ServerState.ERROR_MISSING_RUNTIME -> "RETRY START" // Unified action
         ServerState.VERIFYING_CACHE -> "CHECKING..."
+        ServerState.DOWNLOADING -> "DOWNLOADING..."
         ServerState.INSTALLING -> "INSTALLING..."
     }
 }
@@ -194,6 +200,7 @@ private fun isButtonEnabled(state: ServerState): Boolean {
         ServerState.STOPPING,
         ServerState.RETRYING,
         ServerState.VERIFYING_CACHE,
+        ServerState.DOWNLOADING,
         ServerState.INSTALLING
     )
 }
@@ -203,13 +210,14 @@ private fun isBusyState(state: ServerState): Boolean {
         ServerState.STARTING,
         ServerState.STOPPING,
         ServerState.VERIFYING_CACHE,
+        ServerState.DOWNLOADING,
         ServerState.INSTALLING
     )
 }
 
 private fun handleButtonClick(viewModel: DashboardViewModel, state: ServerState) {
     when (state) {
-        ServerState.ERROR_MISSING_RUNTIME -> viewModel.toggleServer() // Logic is now in startServer
+        ServerState.NOT_INSTALLED -> viewModel.toggleServer() // startServer handles logic
         ServerState.RUNNING -> viewModel.toggleServer()
         ServerState.STOPPED, ServerState.FATAL_ERROR -> viewModel.toggleServer()
         else -> { /* Do nothing for transitioning states */ }

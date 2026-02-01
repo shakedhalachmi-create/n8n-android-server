@@ -12,9 +12,8 @@ import java.io.File
 import java.util.UUID
 
 enum class ServerState {
-    STOPPED, STARTING, RUNNING, RETRYING, FATAL_ERROR, STOPPING, ERROR_MISSING_RUNTIME,
-    // New states for Smart Update
-    VERIFYING_CACHE, INSTALLING
+    STOPPED, STARTING, RUNNING, RETRYING, FATAL_ERROR, STOPPING, 
+    NOT_INSTALLED, DOWNLOADING, INSTALLING, VERIFYING_CACHE
 }
 
 class ServerManager private constructor(
@@ -24,6 +23,20 @@ class ServerManager private constructor(
 ) {
     private val _state = MutableStateFlow(ServerState.STOPPED)
     val state: StateFlow<ServerState> = _state.asStateFlow()
+
+    companion object {
+        private const val TAG = "ServerManager"
+        private const val PORT = "5679"
+
+        @Volatile
+        private var INSTANCE: ServerManager? = null
+
+        fun getInstance(context: Context): ServerManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: ServerManager(context.applicationContext).also { INSTANCE = it }
+            }
+        }
+    }
 
     // Hidden Debug Flag
     val isSmartUpdateEnabled = MutableStateFlow(false)
@@ -42,17 +55,105 @@ class ServerManager private constructor(
     private val archiveLogFile = File(logDir, "n8n-archive.log")
     private val pidFile = File(userDataDir, "n8n.pid")
 
-    companion object {
-        private const val TAG = "ServerManager"
-        private const val PORT = "5679"
+    private val _downloadProgress = MutableStateFlow(0f)
+    val downloadProgress: StateFlow<Float> = _downloadProgress.asStateFlow()
 
-        @Volatile
-        private var INSTANCE: ServerManager? = null
+    /**
+     * Smart Update Flow:
+     * 1. Check Metadata
+     * 2. Check Installed Version (Skip if match)
+     * 3. Check Cache (Install if match)
+     * 4. Download (Last resort)
+     */
+    suspend fun checkAndInstallRuntime(trustCache: Boolean = false): Boolean {
+        // 1. Fetch Metadata
+        val metadata = RuntimeDownloader.getLatestMetadata()
+        if (metadata == null) {
+            Log.e(TAG, "Failed to fetch metadata")
+            return RuntimeInstaller.isRuntimeAvailable(context)
+        }
+        val remoteHash = metadata.sha256
 
-        fun getInstance(context: Context): ServerManager {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: ServerManager(context.applicationContext).also { INSTANCE = it }
+        // 2. Check Installed Version
+        _state.value = ServerState.VERIFYING_CACHE
+        val installedHash = RuntimeInstaller.getInstalledHash(context)
+        if (installedHash != null && installedHash.equals(remoteHash, ignoreCase = true)) {
+            Log.i(TAG, "System is up to date.")
+            if (!trustCache) {
+                 if (_state.value != ServerState.RUNNING) _state.value = ServerState.STOPPED
+                 return true
             }
+        }
+
+        // 3. Check Local Cache
+        val cacheDir = context.externalCacheDir ?: context.cacheDir
+        val archiveFile = File(cacheDir, "n8n-android-arm64.tar.gz")
+
+        if (archiveFile.exists()) {
+             // ... (Keep existing cache logic, just ensure state transitions are correct) ...
+             // Simplified for brevity in this replacement, assuming inner logic is mostly same but ensuring INSTALLING state
+             val cachedHash = RuntimeDownloader.calculateSha256(archiveFile)
+             if (cachedHash.equals(remoteHash, ignoreCase = true) || trustCache) {
+                 _state.value = ServerState.INSTALLING
+                 _downloadProgress.value = 1.0f
+                 val installed = RuntimeInstaller.installFromArchive(context, archiveFile, remoteHash, verifyIntegrity = false)
+                 if (installed) _state.value = ServerState.STOPPED else _state.value = ServerState.NOT_INSTALLED
+                 return installed
+             } else {
+                 archiveFile.delete()
+             }
+        }
+        
+        // 4. Download
+        _state.value = ServerState.DOWNLOADING
+        logToUi("Downloading runtime...")
+        try {
+            _downloadProgress.value = 0.01f
+            val downloaded = RuntimeDownloader.downloadRuntime(
+                metadata.downloadUrl,
+                archiveFile,
+                remoteHash
+            ) { progress ->
+                _downloadProgress.value = progress
+            }
+            
+            if (!downloaded) {
+                logToUi("Download failed.")
+                _state.value = ServerState.NOT_INSTALLED
+                return false
+            }
+            
+            _state.value = ServerState.INSTALLING
+            logToUi("Installing runtime...")
+            _downloadProgress.value = 1.0f 
+            
+            val installed = RuntimeInstaller.installFromArchive(context, archiveFile, remoteHash, verifyIntegrity = false)
+            if (installed) {
+                logToUi("Installation complete.")
+                _state.value = ServerState.STOPPED
+            } else {
+                logToUi("Installation failed.")
+                _state.value = ServerState.NOT_INSTALLED
+            }
+            return installed
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Install failed", e)
+             _state.value = ServerState.FATAL_ERROR
+            return false
+        }
+    }
+
+    private fun logToUi(message: String) {
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val formatted = "[$timestamp] $message"
+        try {
+            logFile.parentFile?.mkdirs()
+            logFile.appendText("$formatted\n")
+            archiveLogFile.appendText("$formatted\n")
+            checkAndRotateLogs()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to write to UI log", e)
         }
     }
 
@@ -62,27 +163,27 @@ class ServerManager private constructor(
         processJob = scope.launch {
             try {
                 _state.value = ServerState.STARTING
-                println("DEBUG: ServerState set to STARTING")
+                logToUi("Initializing Server Startup...")
 
-                // 0. Update Check
-                // Automatically check for updates on startup. Fails gracefully if offline.
-                // Dev Mode (isSmartUpdateEnabled) allows force-installing from cache (trustCache).
-                Log.i(TAG, "Checking for updates before start...")
-                checkAndInstallRuntime(trustCache = isSmartUpdateEnabled.value)
-                
-                // 1. Pre-Flight Checks
-                println("DEBUG: Checking nodeBin at: " + nodeBin.absolutePath)
+                // 0. Update/Install Check
                 if (!ensureBinariesExist()) {
-                    _state.value = ServerState.ERROR_MISSING_RUNTIME
-                    Log.e(TAG, "Runtime binaries missing. Use OTA to install.")
-                    return@launch
+                    logToUi("Runtime not found. Initiating auto-install...")
+                    val success = checkAndInstallRuntime(trustCache = isSmartUpdateEnabled.value)
+                    if (!success) {
+                        logToUi("Auto-install failed. Aborting.")
+                        _state.value = ServerState.NOT_INSTALLED
+                        return@launch
+                    }
+                    // If install success, state is STOPPED. Set back to STARTING to proceed.
+                    _state.value = ServerState.STARTING
                 }
                 
                 // 2. Prepare Environment
+                logToUi("Preparing environment...")
                 val encryptionKey = getOrGenerateEncryptionKey()
                 if (encryptionKey == null) {
+                    logToUi("FATAL: Encryption key generation failed.")
                     _state.value = ServerState.FATAL_ERROR
-                    Log.e(TAG, "Encryption Key issue. Aborting.")
                     return@launch
                 }
                 
@@ -92,7 +193,6 @@ class ServerManager private constructor(
                 val n8nEntry = File(runtimeRoot, "lib/node_modules/n8n/bin/n8n")
                 val bootstrapScript = File(runtimeRoot, "bin/n8n-start.sh")
                 val command = if (bootstrapScript.exists()) {
-                    // Explicitly use sh to avoid Shebang execution issues on some Android ROMs
                     listOf("/system/bin/sh", bootstrapScript.absolutePath)
                 } else {
                     listOf(nodeBin.absolutePath, n8nEntry.absolutePath, "start")
@@ -102,10 +202,11 @@ class ServerManager private constructor(
                 userDataDir.mkdirs()
                 logDir.mkdirs()
 
-                Log.i(TAG, "Starting n8n process: $command")
+                logToUi("Launching n8n process...")
                 currentProcess = processRunner.start(command, env, userDataDir)
+                logToUi("Process started (PID: ${currentProcess?.pid()}). Waiting for port $PORT...")
                 
-                // 5. Stream Consumption (Critical)
+                // 5. Stream Consumption
                 launch(Dispatchers.IO) { consumeStream(currentProcess!!.inputStream, "STDOUT") }
                 launch(Dispatchers.IO) { consumeStream(currentProcess!!.errorStream, "STDERR") }
                 
@@ -116,164 +217,49 @@ class ServerManager private constructor(
                    pidFile.writeText(pid.toString())
                 }
                 
+                // 7. Port Polling (Max 45s)
+                var portReady = false
+                val startTime = System.currentTimeMillis()
+                while (System.currentTimeMillis() - startTime < 45000) { // 45s timeout
+                    if (currentProcess?.isAlive() != true) {
+                        logToUi("Process died unexpectedly.")
+                        break 
+                    }
+                    try {
+                        java.net.Socket("127.0.0.1", PORT.toInt()).use { portReady = true }
+                    } catch (e: Exception) {
+                        // Retry
+                    }
+                    
+                    if (portReady) {
+                        logToUi("Port $PORT is OPEN. Server is RUNNING.")
+                        break
+                    }
+                    delay(1000)
+                }
+
+                if (!portReady) {
+                     logToUi("FATAL: Timed out waiting for port $PORT.")
+                     stopServer() // Cleanup
+                     _state.value = ServerState.FATAL_ERROR
+                     return@launch
+                }
+                
                 _state.value = ServerState.RUNNING
                 
-                // 7. Wait for exit
+                // 8. Wait for exit
                 val exitCode = currentProcess!!.waitFor()
+                logToUi("Server process exited with code $exitCode")
                 handleExit(exitCode)
 
+            } catch (e: CancellationException) {
+                logToUi("Server process cancelled.")
+                _state.value = ServerState.STOPPED
             } catch (e: Exception) {
+                logToUi("FATAL EXCEPTION: ${e.message}")
                 Log.e(TAG, "Error starting server", e)
                 _state.value = ServerState.FATAL_ERROR
             }
-        }
-    }
-    
-    fun stopServer() {
-        scope.launch {
-            _state.value = ServerState.STOPPING
-            currentProcess?.let { proc ->
-                proc.destroy() 
-                delay(5000)
-                if (proc.isAlive()) {
-                    Log.w(TAG, "Process ignored SIGTERM. Sending SIGKILL.")
-                    proc.destroyForcibly()
-                }
-            }
-            currentProcess = null
-            _state.value = ServerState.STOPPED
-        }
-    }
-    
-    fun performHardRestart() {
-        scope.launch {
-            Log.w(TAG, "Performing Hard Restart...")
-            stopServer()
-            delay(6000) // 5s wait in stop + buffer
-            startServer()
-        }
-    }
-    
-    fun isAlive(): Boolean {
-        return currentProcess?.isAlive() == true
-    }
-
-    private val _downloadProgress = MutableStateFlow(0f)
-    val downloadProgress: StateFlow<Float> = _downloadProgress.asStateFlow()
-
-    /**
-     * Smart Update Flow:
-     * 1. Check Metadata
-     * 2. Check Installed Version (Skip if match)
-     * 3. Check Cache (Install if match)
-     * 4. Download (Last resort)
-     * @param trustCache If true, installs from cache even if checksum doesn't match remote (Dev Mode)
-     */
-    suspend fun checkAndInstallRuntime(trustCache: Boolean = false): Boolean {
-        // 1. Fetch Metadata
-        val metadata = RuntimeDownloader.getLatestMetadata()
-        if (metadata == null) {
-            Log.e(TAG, "Failed to fetch metadata")
-            // Fallback: If we have ANY runtime installed, just use it?
-            // For now, fail safe.
-            return RuntimeInstaller.isRuntimeAvailable(context)
-        }
-        val remoteHash = metadata.sha256
-
-        // 2. Check Installed Version
-        _state.value = ServerState.VERIFYING_CACHE
-        val installedHash = RuntimeInstaller.getInstalledHash(context)
-        if (installedHash != null && installedHash.equals(remoteHash, ignoreCase = true)) {
-            Log.i(TAG, "System is up to date (Hash: $installedHash).")
-            if (!trustCache) {
-                Log.i(TAG, "Skipping update.")
-                if (_state.value != ServerState.RUNNING) _state.value = ServerState.STOPPED
-                return true
-            }
-            Log.i(TAG, "Trust Cache is ON. Checking for local override...")
-        }
-
-        // 3. Check Local Cache
-        val cacheDir = context.externalCacheDir ?: context.cacheDir
-        val archiveFile = File(cacheDir, "n8n-android-arm64.tar.gz")
-
-        if (archiveFile.exists()) {
-             Log.i(TAG, "Found archived runtime. Verifying integrity...")
-             val cachedHash = RuntimeDownloader.calculateSha256(archiveFile)
-                 val matches = cachedHash.equals(remoteHash, ignoreCase = true)
-                 
-                 if (matches || trustCache) {
-                     if (matches) {
-                         Log.i(TAG, "Cache hit! Installing from local archive...")
-                     } else {
-                         Log.w(TAG, "Cache mismatch. Trust Cache is ON. Installing Dev Build...")
-                     }
-
-                     _state.value = ServerState.INSTALLING
-                     _downloadProgress.value = 1.0f // Show full bar
-                     
-                     val installed = RuntimeInstaller.installFromArchive(context, archiveFile, remoteHash, verifyIntegrity = false)
-                     if (installed) {
-                         _state.value = ServerState.STOPPED
-                     } else {
-                         _state.value = ServerState.ERROR_MISSING_RUNTIME
-                     }
-                     return installed
-                 } else {
-                     Log.w(TAG, "Cache mismatch (Got $cachedHash, Expected $remoteHash). Will re-download.")
-                     archiveFile.delete()
-                 }
-        }
-        
-        // 4. Download as Last Resort
-        _state.value = ServerState.ERROR_MISSING_RUNTIME // Or some "DOWNLOADING" state? 
-        // We stay in ERROR_MISSING_RUNTIME or introduce DOWNLOADING.
-        // The UI uses 'downloadProgress > 0' to show bar.
-        // Let's stick to ERROR_MISSING_RUNTIME (which shows the download button/bar) or better,
-        // Since we are *actively* downloading now, maybe we should indicate that?
-        // Actually the UI triggers this method via button click usually.
-        // But if called automatically, we want the UI to reflect progress.
-        // Let's use ERROR_MISSING_RUNTIME state (which in UI enables the download view) 
-        // OR add DOWNLOADING. 
-        // For now, 'ServerControlCard' shows progress bar if progress > 0.
-        // So we can keep ERROR_MISSING_RUNTIME or STOPPED while downloading, ensuring progress updates.
-        // However, we want to block Start button.
-        
-        // Let's proceed with download.
-        try {
-            _downloadProgress.value = 0.01f // Started
-            val downloaded = RuntimeDownloader.downloadRuntime(
-                metadata.downloadUrl,
-                archiveFile,
-                remoteHash
-            ) { progress ->
-                _downloadProgress.value = progress
-            }
-            
-            if (!downloaded) {
-                Log.e(TAG, "Download failed or checksum mismatch")
-                _downloadProgress.value = 0f
-                return false
-            }
-            
-            _state.value = ServerState.INSTALLING
-            _downloadProgress.value = 1.0f 
-            
-            // 5. Extract
-            // 5. Extract
-            val installed = RuntimeInstaller.installFromArchive(context, archiveFile, remoteHash, verifyIntegrity = false)
-            if (installed) {
-                _state.value = ServerState.STOPPED
-            } else {
-                _state.value = ServerState.ERROR_MISSING_RUNTIME
-            }
-            return installed
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Install failed", e)
-            _downloadProgress.value = 0f
-             _state.value = ServerState.ERROR_MISSING_RUNTIME
-            return false
         }
     }
 
@@ -378,19 +364,77 @@ class ServerManager private constructor(
         return env
     }
     
-    private fun handleExit(exitCode: Int) {
+    private suspend fun handleExit(exitCode: Int) {
         Log.w(TAG, "Process exited with code $exitCode")
+        
+        if (_state.value == ServerState.STOPPING) {
+            logToUi("Process terminated. Cool-down (3s)...")
+            delay(3000)
+        }
         
         if (exitCode == 101) { 
              _state.value = ServerState.FATAL_ERROR
              return
         }
         
-        if (exitCode == 0 || exitCode == 143) { 
+        if (exitCode == 0 || exitCode == 143 || _state.value == ServerState.STOPPING) { 
              _state.value = ServerState.STOPPED
+             logToUi("Server is now fully STOPPED.")
+             currentProcess = null
              return
         }
         
         _state.value = ServerState.RETRYING
+    }
+
+    fun stopServer() {
+        if (_state.value == ServerState.STOPPED || _state.value == ServerState.STOPPING) return
+        _state.value = ServerState.STOPPING
+        logToUi("Stopping n8n server...")
+        
+        scope.launch {
+            try {
+                // 1. Try graceful termination
+                currentProcess?.destroy()
+                
+                // 2. Monitor exit for up to 5 seconds
+                // handleExit() handles the standard 3s cool-down.
+                // We only invoke force kill if the process acts stuck.
+                var attempts = 0
+                while (attempts < 50) { // 5 seconds (100ms intervals)
+                    if (_state.value == ServerState.STOPPED) return@launch // Success
+                    
+                    if (attempts == 20) { // After 2s, try force kill
+                        if (currentProcess?.isAlive() == true) {
+                            logToUi("Process unresponsive. Forcing kill...")
+                            currentProcess?.destroyForcibly()
+                        }
+                    }
+                    
+                    delay(100)
+                    attempts++
+                }
+                
+                // 3. Failsafe
+                if (_state.value != ServerState.STOPPED) {
+                    logToUi("Shutdown timed out. Forcing state reset.")
+                    processJob?.cancel()
+                    currentProcess = null
+                    _state.value = ServerState.STOPPED
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in stop sequence", e)
+                _state.value = ServerState.STOPPED
+            }
+        }
+    }
+    
+    fun performHardRestart() {
+        scope.launch {
+            logToUi("Hard restart requested...")
+            stopServer()
+            delay(2000)
+            startServer()
+        }
     }
 }

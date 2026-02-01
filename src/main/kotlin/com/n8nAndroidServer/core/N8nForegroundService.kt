@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 
 /**
  * Foreground Service for n8n server management.
@@ -77,7 +78,13 @@ class N8nForegroundService : Service() {
                 GatekeeperModule.stop()
                 CommandBridge.stop()
                 serverManager.stopServer()
-                stopSelf()
+                
+                // Wait for fully STOPPED state before stopSelf()
+                scope.launch {
+                    serverManager.state.first { it == ServerState.STOPPED }
+                    Log.i(TAG, "Server fully stopped. Stopping service...")
+                    stopSelf()
+                }
             }
         }
         
@@ -174,6 +181,7 @@ class N8nForegroundService : Service() {
     }
     
     private fun startMonitoring() {
+        monitorJob?.cancel() // Fix: Prevent multiple concurrent monitoring jobs
         monitorJob = scope.launch {
             serverManager.state.collect { state ->
                 val statusText = when (state) {
@@ -183,7 +191,8 @@ class N8nForegroundService : Service() {
                     ServerState.STOPPED -> "Server Stopped"
                     ServerState.RETRYING -> "Retrying..."
                     ServerState.FATAL_ERROR -> "Fatal Error"
-                    ServerState.ERROR_MISSING_RUNTIME -> "Runtime Missing"
+                    ServerState.NOT_INSTALLED -> "Not Installed"
+                    ServerState.DOWNLOADING -> "Downloading Runtime..."
                     ServerState.VERIFYING_CACHE -> "Verifying Update..."
                     ServerState.INSTALLING -> "Installing Runtime..."
                 }

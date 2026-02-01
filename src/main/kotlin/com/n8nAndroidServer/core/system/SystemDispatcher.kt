@@ -79,7 +79,9 @@ class SystemDispatcher(private val context: Context) : BluetoothProfile.ServiceL
                 "battery" -> handleBattery(req)
                 "flashlight" -> handleFlashlight(req)
                 "volume" -> handleVolume(req)
-                "display" -> handleDisplay(req)
+                "brightness" -> handleBrightness(req)
+                "screen" -> handleScreen(req)
+                "display" -> handleBrightness(req) // Legacy alias for brightness mostly
                 "connectivity" -> handleConnectivity(req)
                 "wifi" -> handleConnectivity(req)
                 "src" -> handleUi(req) // Typos/Legacy
@@ -91,6 +93,82 @@ class SystemDispatcher(private val context: Context) : BluetoothProfile.ServiceL
         } catch (e: Exception) {
             Log.e(TAG, "Execution failed", e)
             SystemResult(false, "Error: ${e.message}")
+        }
+    }
+
+    // ... (handleBluetooth, etc.)
+
+    private fun handleBrightness(req: SystemRequest): SystemResult {
+        if (!Settings.System.canWrite(context)) {
+            return SystemResult(false, "Missing WRITE_SETTINGS permission")
+        }
+
+        // 1. Simplified Protocol: Action IS the level (e.g. "200")
+        val levelFromAction = req.action.toIntOrNull()
+        if (levelFromAction != null) {
+            return setBrightness(levelFromAction)
+        }
+
+        return try {
+            when (req.action.lowercase()) {
+                "set", "set_brightness" -> {
+                    val levelStr = req.params?.get("level") ?: return SystemResult(false, "Missing parameter: level")
+                    val level = levelStr.toIntOrNull() ?: return SystemResult(false, "Invalid level")
+                    setBrightness(level)
+                }
+                "auto", "auto_brightness" -> {
+                     Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
+                     SystemResult(true, "Auto-Brightness enabled")
+                }
+                "status", "get" -> {
+                    val mode = Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1)
+                    val level = Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, -1)
+                    val modeStr = if (mode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC) "Auto" else "Manual"
+                    SystemResult(true, "Level: $level, Mode: $modeStr")
+                }
+                else -> SystemResult(false, "Unknown Brightness action: ${req.action}")
+            }
+        } catch (e: Exception) {
+            SystemResult(false, "Brightness Error: ${e.message}")
+        }
+    }
+
+    private fun setBrightness(level: Int): SystemResult {
+        val finalLevel = level.coerceIn(0, 255)
+        Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+        Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, finalLevel)
+        return SystemResult(true, "Brightness set to $finalLevel")
+    }
+
+    private fun handleScreen(req: SystemRequest): SystemResult {
+        return try {
+             when (req.action.lowercase()) {
+                "on" -> {
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                    val wakeLock = pm.newWakeLock(
+                        android.os.PowerManager.FULL_WAKE_LOCK or
+                                android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                                android.os.PowerManager.ON_AFTER_RELEASE,
+                        "n8n:WakeLock"
+                    )
+                    wakeLock.acquire(1000)
+                    SystemResult(true, "Screen turned ON")
+                }
+                "off" -> {
+                    handleUi(SystemRequest("ui", "lock"))
+                }
+                "status" -> {
+                    val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                    val isInteractive = pm.isInteractive
+                    SystemResult(true, if (isInteractive) "ON" else "OFF")
+                }
+                else -> SystemResult(false, "Unknown Screen action: ${req.action}")
+             }.also {
+                 Log.d(TAG, "Screen Result: ${it.success} - ${it.message}")
+             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Screen Error", e)
+            SystemResult(false, "Screen Error: ${e.message}")
         }
     }
 
@@ -289,33 +367,7 @@ class SystemDispatcher(private val context: Context) : BluetoothProfile.ServiceL
         }
     }
 
-    private fun handleDisplay(req: SystemRequest): SystemResult {
-        if (!Settings.System.canWrite(context)) {
-            return SystemResult(false, "Missing WRITE_SETTINGS permission")
-        }
-
-        return try {
-            when (req.action.lowercase()) {
-                "set_brightness" -> {
-                    val levelStr = req.params?.get("level") ?: return SystemResult(false, "Missing parameter: level")
-                    val level = levelStr.toIntOrNull()?.coerceIn(0, 255) ?: return SystemResult(false, "Invalid level (0-255)")
-                    
-                    // Disable Auto-Brightness first to ensure manual setting takes effect
-                    Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
-                    Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, level)
-                    
-                    SystemResult(true, "Brightness set to $level")
-                }
-                "auto_brightness" -> {
-                     Settings.System.putInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
-                     SystemResult(true, "Auto-Brightness enabled")
-                }
-                else -> SystemResult(false, "Unknown Display action")
-            }
-        } catch (e: Exception) {
-            SystemResult(false, "Display Error: ${e.message}")
-        }
-    }
+    // handleDisplay removed (Split into handleBrightness and handleScreen)
 
     @Suppress("DEPRECATION")
     private fun handleConnectivity(req: SystemRequest): SystemResult {
@@ -456,10 +508,14 @@ class SystemDispatcher(private val context: Context) : BluetoothProfile.ServiceL
             }
             "lock" -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    service.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
-                    SystemResult(true, "Screen locked")
+                    val success = service.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
+                    if (success) {
+                        SystemResult(true, "Screen locked")
+                    } else {
+                        SystemResult(false, "Screen lock command failed (Accessibility Service rejected action)")
+                    }
                 } else {
-                    SystemResult(false, "Lock screen requires Android P+")
+                    SystemResult(false, "Lock screen requires Android P+ (Current SDK: ${Build.VERSION.SDK_INT})")
                 }
             }
             else -> SystemResult(false, "Unknown UI action")

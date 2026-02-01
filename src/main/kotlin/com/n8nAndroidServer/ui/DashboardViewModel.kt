@@ -80,6 +80,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun startPolling() {
+        pollJob?.cancel() // Fix: Prevent multiple concurrent polling loops
         pollJob = viewModelScope.launch(Dispatchers.IO) {
             while (true) {
                 // Poll Pending Requests
@@ -99,7 +100,16 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 checkLocationPermission()
                 checkDevMode()
 
-                delay(2000) // 2 seconds poll interval
+                checkDevMode()
+                
+                // Adaptive Polling: Poll faster during critical transitions
+                val state = serverState.value
+                val delayMs = if (state == ServerState.STARTING || state == ServerState.INSTALLING || state == ServerState.STOPPING || state == ServerState.DOWNLOADING || state == ServerState.VERIFYING_CACHE) {
+                    1000L 
+                } else {
+                    5000L
+                }
+                delay(delayMs)
             }
         }
     }
@@ -113,7 +123,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         if (currentState == ServerState.RUNNING) {
             intent.action = com.n8nAndroidServer.core.N8nForegroundService.ACTION_STOP
             context.startService(intent) // or startForegroundService if needed, but startService is fine for stop
-        } else if (currentState == ServerState.STOPPED || currentState == ServerState.FATAL_ERROR || currentState == ServerState.ERROR_MISSING_RUNTIME) {
+        } else if (currentState == ServerState.STOPPED || currentState == ServerState.FATAL_ERROR || currentState == ServerState.NOT_INSTALLED) {
             intent.action = com.n8nAndroidServer.core.N8nForegroundService.ACTION_START
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -215,25 +225,48 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
     
+    private var lastLogOffset = 0L
+
     private fun readLogs() {
         val logFile = java.io.File(getApplication<Application>().filesDir, "userdata/logs/n8n.log")
         if (logFile.exists()) {
             try {
-                // Tail last 5KB
-                val length = logFile.length()
-                val readSize = 5120L // 5KB
-                val start = if (length > readSize) length - readSize else 0L
-                
-                logFile.inputStream().use { stream ->
-                    if (start > 0) stream.skip(start)
-                    val bytes = stream.readBytes()
-                    _logContent.value = String(bytes)
+                val currentLength = logFile.length()
+
+                // If file was truncated or cleared, reset
+                if (currentLength < lastLogOffset) {
+                    lastLogOffset = 0L
+                    _logContent.value = ""
+                }
+
+                // Initial read or new data available
+                if (currentLength > lastLogOffset) {
+                    // On first read, we might want a tail of the last 5KB if offset is 0
+                    val start = if (lastLogOffset == 0L && currentLength > 5120L) {
+                        currentLength - 5120L
+                    } else {
+                        lastLogOffset
+                    }
+
+                    logFile.inputStream().use { stream ->
+                        if (start > 0) stream.skip(start)
+                        val bytes = stream.readBytes()
+                        val newFragment = String(bytes)
+                        
+                        // Append and keep only reasonable tail in memory for UI (e.g., 20KB)
+                        val combined = (_logContent.value + newFragment).takeLast(20480)
+                        _logContent.value = combined
+                        lastLogOffset = currentLength
+                    }
                 }
             } catch (e: Exception) {
                 // ignore
             }
         } else {
-            _logContent.value = "Log file not found."
+            if (_logContent.value != "Log file not found.") {
+                _logContent.value = "Log file not found."
+                lastLogOffset = 0L
+            }
         }
     }
     
