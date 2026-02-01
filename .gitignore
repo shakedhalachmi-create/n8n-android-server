@@ -19,6 +19,7 @@ plans/
 # System
 .DS_Store
 Thumbs.db
+*.Identifier
 
 # IDE
 .idea/
