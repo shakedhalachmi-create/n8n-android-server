@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">n8n Android Server</string>
+    <string name="accessibility_service_description">Allows n8n Android Server to perform clicks and gestures for automation.</string>
+</resources>

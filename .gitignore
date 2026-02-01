@@ -1,0 +1,25 @@
+# Android
+build/
+.gradle/
+local.properties
+
+# Build Artifacts & Temp
+build_work/
+scripts/build_work/
+*.deb
+*.tgz
+*.tar.gz
+n8n-android-arm64.tar.gz
+metadata.json
+package/
+
+# Planning & Logs
+plans/
+
+# System
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.iml

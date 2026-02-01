@@ -1,0 +1,9 @@
+Version: 2.4.8
+Cannot read properties of undefined (reading 'model')
+
+Editor is now accessible via:
+http://127.0.0.1:5679
+Owner was set up successfully
+User attempted to access a workflow without permissions
+404 Could not load the workflow - you can only access workflows owned by you
+User survey updated successfully
