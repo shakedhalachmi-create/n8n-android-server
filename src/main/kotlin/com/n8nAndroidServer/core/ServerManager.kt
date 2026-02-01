@@ -26,7 +26,7 @@ class ServerManager private constructor(
     val state: StateFlow<ServerState> = _state.asStateFlow()
 
     // Hidden Debug Flag
-    val isSmartUpdateEnabled = MutableStateFlow(true)
+    val isSmartUpdateEnabled = MutableStateFlow(false)
 
     private var currentProcess: RunningProcess? = null
     private var processJob: Job? = null
@@ -64,11 +64,11 @@ class ServerManager private constructor(
                 _state.value = ServerState.STARTING
                 println("DEBUG: ServerState set to STARTING")
 
-                // 0. Smart Update Check (Hidden Flag)
-                if (isSmartUpdateEnabled.value) {
-                    Log.i(TAG, "Smart Update Flag Active. Checking for updates...")
-                    checkAndInstallRuntime(trustCache = true)
-                }
+                // 0. Update Check
+                // Automatically check for updates on startup. Fails gracefully if offline.
+                // Dev Mode (isSmartUpdateEnabled) allows force-installing from cache (trustCache).
+                Log.i(TAG, "Checking for updates before start...")
+                checkAndInstallRuntime(trustCache = isSmartUpdateEnabled.value)
                 
                 // 1. Pre-Flight Checks
                 println("DEBUG: Checking nodeBin at: " + nodeBin.absolutePath)
