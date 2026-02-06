@@ -59,88 +59,22 @@ class ServerManager private constructor(
     val downloadProgress: StateFlow<Float> = _downloadProgress.asStateFlow()
 
     /**
-     * Smart Update Flow:
-     * 1. Check Metadata
-     * 2. Check Installed Version (Skip if match)
-     * 3. Check Cache (Install if match)
-     * 4. Download (Last resort)
+     * Installs or updates the runtime from assets.
      */
-    suspend fun checkAndInstallRuntime(trustCache: Boolean = false): Boolean {
-        // 1. Fetch Metadata
-        val metadata = RuntimeDownloader.getLatestMetadata()
-        if (metadata == null) {
-            Log.e(TAG, "Failed to fetch metadata")
-            return RuntimeInstaller.isRuntimeAvailable(context)
-        }
-        val remoteHash = metadata.sha256
-
-        // 2. Check Installed Version
-        _state.value = ServerState.VERIFYING_CACHE
-        val installedHash = RuntimeInstaller.getInstalledHash(context)
-        if (installedHash != null && installedHash.equals(remoteHash, ignoreCase = true)) {
-            Log.i(TAG, "System is up to date.")
-            if (!trustCache) {
-                 if (_state.value != ServerState.RUNNING) _state.value = ServerState.STOPPED
-                 return true
-            }
-        }
-
-        // 3. Check Local Cache
-        val cacheDir = context.externalCacheDir ?: context.cacheDir
-        val archiveFile = File(cacheDir, "n8n-android-arm64.tar.gz")
-
-        if (archiveFile.exists()) {
-             // ... (Keep existing cache logic, just ensure state transitions are correct) ...
-             // Simplified for brevity in this replacement, assuming inner logic is mostly same but ensuring INSTALLING state
-             val cachedHash = RuntimeDownloader.calculateSha256(archiveFile)
-             if (cachedHash.equals(remoteHash, ignoreCase = true) || trustCache) {
-                 _state.value = ServerState.INSTALLING
-                 _downloadProgress.value = 1.0f
-                 val installed = RuntimeInstaller.installFromArchive(context, archiveFile, remoteHash, verifyIntegrity = false)
-                 if (installed) _state.value = ServerState.STOPPED else _state.value = ServerState.NOT_INSTALLED
-                 return installed
-             } else {
-                 archiveFile.delete()
-             }
-        }
+    suspend fun installRuntime(): Boolean {
+        _state.value = ServerState.INSTALLING
+        logToUi("Verifying Runtime Assets...")
         
-        // 4. Download
-        _state.value = ServerState.DOWNLOADING
-        logToUi("Downloading runtime...")
-        try {
-            _downloadProgress.value = 0.01f
-            val downloaded = RuntimeDownloader.downloadRuntime(
-                metadata.downloadUrl,
-                archiveFile,
-                remoteHash
-            ) { progress ->
-                _downloadProgress.value = progress
-            }
-            
-            if (!downloaded) {
-                logToUi("Download failed.")
-                _state.value = ServerState.NOT_INSTALLED
-                return false
-            }
-            
-            _state.value = ServerState.INSTALLING
-            logToUi("Installing runtime...")
-            _downloadProgress.value = 1.0f 
-            
-            val installed = RuntimeInstaller.installFromArchive(context, archiveFile, remoteHash, verifyIntegrity = false)
-            if (installed) {
-                logToUi("Installation complete.")
+        return withContext(Dispatchers.IO) {
+            val success = RuntimeInstaller.installFromAssets(context)
+            if (success) {
+                logToUi("Runtime ready.")
                 _state.value = ServerState.STOPPED
             } else {
-                logToUi("Installation failed.")
-                _state.value = ServerState.NOT_INSTALLED
+                logToUi("FATAL: Runtime installation failed.")
+                _state.value = ServerState.FATAL_ERROR
             }
-            return installed
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Install failed", e)
-             _state.value = ServerState.FATAL_ERROR
-            return false
+            success
         }
     }
 
@@ -165,18 +99,13 @@ class ServerManager private constructor(
                 _state.value = ServerState.STARTING
                 logToUi("Initializing Server Startup...")
 
-                // 0. Update/Install Check
-                if (!ensureBinariesExist()) {
-                    logToUi("Runtime not found. Initiating auto-install...")
-                    val success = checkAndInstallRuntime(trustCache = isSmartUpdateEnabled.value)
-                    if (!success) {
-                        logToUi("Auto-install failed. Aborting.")
-                        _state.value = ServerState.NOT_INSTALLED
-                        return@launch
-                    }
-                    // If install success, state is STOPPED. Set back to STARTING to proceed.
-                    _state.value = ServerState.STARTING
+                // 1. Install / Verify Runtime
+                if (!installRuntime()) {
+                    return@launch
                 }
+                
+                // If install success, state might be STOPPED. Set back to STARTING.
+                _state.value = ServerState.STARTING
                 
                 // 2. Prepare Environment
                 logToUi("Preparing environment...")
@@ -192,9 +121,12 @@ class ServerManager private constructor(
                 // 3. Command construction
                 val n8nEntry = File(runtimeRoot, "lib/node_modules/n8n/bin/n8n")
                 val bootstrapScript = File(runtimeRoot, "bin/n8n-start.sh")
+                
+                // Use bootstrap script which handles LD_LIBRARY_PATH and execution
                 val command = if (bootstrapScript.exists()) {
                     listOf("/system/bin/sh", bootstrapScript.absolutePath)
                 } else {
+                    // Fallback (Should typically not happen with new installer)
                     listOf(nodeBin.absolutePath, n8nEntry.absolutePath, "start")
                 }
 
