@@ -47,7 +47,8 @@ node_modules/
 *.tar.gz
 # Explicitly allow the source runtime in assets
 src/main/assets/core_runtime.n8n
-
+*.Identifier
+*.md
 # ==============================================================================
 # n8n Server & User Data
 # ==============================================================================

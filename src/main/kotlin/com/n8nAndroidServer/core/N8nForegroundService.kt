@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import com.n8nAndroidServer.core.LegacyServerState as ServerState
 
 /**
  * Foreground Service for n8n server management.

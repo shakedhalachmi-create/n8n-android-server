@@ -8,7 +8,7 @@ import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.n8nAndroidServer.core.ServerManager
-import com.n8nAndroidServer.core.ServerState
+import com.n8nAndroidServer.core.LegacyServerState as ServerState
 import com.n8nAndroidServer.gatekeeper.WhitelistDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
