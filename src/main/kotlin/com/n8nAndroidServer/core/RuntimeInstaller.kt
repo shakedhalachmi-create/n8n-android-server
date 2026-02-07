@@ -14,7 +14,7 @@ object RuntimeInstaller {
     private const val TAG = "RuntimeInstaller"
     private const val PREFS_NAME = "n8n_runtime_prefs"
     private const val KEY_ASSET_VERSION = "last_asset_version_code"
-    private const val ASSET_FILENAME = "core_runtime.tar.gz"
+    private const val ASSET_FILENAME = "core_runtime.n8n"
 
     /**
      * Installs the runtime from assets if not present or if app version changed.
@@ -52,7 +52,15 @@ object RuntimeInstaller {
             }
             runtimeTmp.mkdirs()
             
-            // 2. Stream Asset to Cache (Native tar needs a file path)
+            // 2. Asset Verification & Streaming
+            val assetList = context.assets.list("") ?: emptyArray()
+            Log.d(TAG, "Assets found in APK: ${assetList.joinToString()}")
+
+            if (!assetList.contains(ASSET_FILENAME)) {
+                Log.e(TAG, "CRITICAL: $ASSET_FILENAME MISSING from APK assets! Check build.gradle sourceSets.")
+                return false
+            }
+
             Log.i(TAG, "Streaming $ASSET_FILENAME to cache...")
             context.assets.open(ASSET_FILENAME).use { input ->
                 cacheTar.outputStream().use { output ->

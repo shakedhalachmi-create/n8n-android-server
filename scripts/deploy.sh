@@ -141,7 +141,7 @@ fi
 # 4 & 5. APK Ops
 if [ "$DO_APK" = true ]; then
     echo "--- [5/6] Building and Installing APK ---"
-    ./gradlew assembleDebug || { echo "Gradle build failed"; exit 1; }
+    ./gradlew clean assembleDebug || { echo "Gradle build failed"; exit 1; }
 
     echo "Installing APK..."
     APK_PATH="build/outputs/apk/debug/n8n-android-server-debug.apk"

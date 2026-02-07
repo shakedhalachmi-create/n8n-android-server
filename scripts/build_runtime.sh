@@ -18,9 +18,9 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 ASSETS_DIR="$SCRIPT_DIR/assets"
 BUILD_WORK_DIR="$SCRIPT_DIR/build_work"
-OUTPUT_ASSETS_DIR="$ROOT_DIR/app/src/main/assets"
+OUTPUT_ASSETS_DIR="$ROOT_DIR/src/main/assets"
 OUTPUT_RUNTIME_DIR="$BUILD_WORK_DIR/runtime"
-TARGET_TARBALL="$OUTPUT_ASSETS_DIR/core_runtime.tar.gz"
+TARGET_TARBALL="$OUTPUT_ASSETS_DIR/core_runtime.n8n"
 
 ARCH="aarch64"
 TERMUX_REPO="https://packages.termux.dev/apt/termux-main"
@@ -176,7 +176,17 @@ find . -maxdepth 1 -type f -name "lib*.so*" | while read -r file; do
         echo "  [Rename] $BASENAME -> $CLEAN_NAME"
         mv "$BASENAME" "$CLEAN_NAME"
         # Record mapping (append to a list file, using pipe to avoid subshell var loss)
+        # Record mapping (append to a list file, using pipe to avoid subshell var loss)
         echo "$BASENAME|$CLEAN_NAME" >> "$BUILD_WORK_DIR/lib_mapping.txt"
+
+        # EXTRA: Map Major Version (SONAME) as well
+        # Example: libz.so.1.3.1 -> libz.so.1
+        # If node depends on libz.so.1, we need to map libz.so.1 -> libz.so
+        MAJOR_NAME=$(echo "$BASENAME" | grep -oE '^lib.*\.so\.[0-9]+' | head -n1)
+        if [ -n "$MAJOR_NAME" ] && [ "$MAJOR_NAME" != "$BASENAME" ] && [ "$MAJOR_NAME" != "$CLEAN_NAME" ]; then
+             echo "  [Map Extra] $MAJOR_NAME -> $CLEAN_NAME"
+             echo "$MAJOR_NAME|$CLEAN_NAME" >> "$BUILD_WORK_DIR/lib_mapping.txt"
+        fi
     else
         # Even if already clean, we may need to patch SONAME
         echo "$BASENAME|$BASENAME" >> "$BUILD_WORK_DIR/lib_mapping.txt"
@@ -271,7 +281,7 @@ chmod +x "$OUTPUT_RUNTIME_DIR/bin/n8n-start.sh"
 chmod +x "$NODE_BIN"
 
 # 9. Create Archive
-echo ">>> Archiving core_runtime.tar.gz..."
+echo ">>> Archiving core_runtime.n8n..."
 cd "$OUTPUT_RUNTIME_DIR"
 # Archive everything in current dir (bin, lib, node_modules)
 tar -czf "$TARGET_TARBALL" .

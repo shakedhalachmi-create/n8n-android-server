@@ -101,7 +101,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 checkDevMode()
 
                 checkDevMode()
-                
+
                 // Adaptive Polling: Poll faster during critical transitions
                 val state = serverState.value
                 val delayMs = if (state == ServerState.STARTING || state == ServerState.INSTALLING || state == ServerState.STOPPING || state == ServerState.DOWNLOADING || state == ServerState.VERIFYING_CACHE) {
@@ -139,7 +139,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun checkAndInstallRuntime() {
         viewModelScope.launch(Dispatchers.IO) {
-            serverManager.checkAndInstallRuntime()
+            serverManager.installRuntime()
         }
     }
 

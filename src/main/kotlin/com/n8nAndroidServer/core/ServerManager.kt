@@ -98,6 +98,9 @@ class ServerManager private constructor(
             try {
                 _state.value = ServerState.STARTING
                 logToUi("Initializing Server Startup...")
+                
+                // 0. Cleanup Previous Processes
+                killExistingNodeProcesses()
 
                 // 1. Install / Verify Runtime
                 if (!installRuntime()) {
@@ -367,6 +370,40 @@ class ServerManager private constructor(
             stopServer()
             delay(2000)
             startServer()
+        }
+    }
+
+    fun killExistingNodeProcesses() {
+        logToUi("Cleaning up existing processes...")
+        try {
+            val runtime = Runtime.getRuntime()
+            
+            // method 1: pkill
+            try {
+                runtime.exec(arrayOf("pkill", "-9", "node")).waitFor()
+            } catch (e: Exception) {}
+
+            // method 2: killall
+            try {
+                runtime.exec(arrayOf("killall", "-9", "node")).waitFor()
+            } catch (e: Exception) {}
+
+            // method 3: pidof + kill
+            try {
+                val pidProcess = runtime.exec(arrayOf("pidof", "node"))
+                val pidOutput = pidProcess.inputStream.bufferedReader().readText().trim()
+                if (pidOutput.isNotEmpty()) {
+                    val pids = pidOutput.split("\\s+".toRegex())
+                    for (pid in pids) {
+                        if (pid.isNotEmpty()) {
+                            runtime.exec(arrayOf("kill", "-9", pid)).waitFor()
+                        }
+                    }
+                }
+            } catch (e: Exception) {}
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to kill existing processes", e)
         }
     }
 }

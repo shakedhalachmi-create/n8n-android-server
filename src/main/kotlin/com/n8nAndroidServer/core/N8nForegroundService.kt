@@ -106,6 +106,9 @@ class N8nForegroundService : Service() {
         cancelHeartbeat()
         monitorJob?.cancel()
         scope.cancel()
+        
+        // Ensure zombie processes are killed
+        serverManager.killExistingNodeProcesses()
     }
     
     private fun acquireWakeLocks() {
