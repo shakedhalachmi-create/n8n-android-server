@@ -46,7 +46,7 @@ node_modules/
 # Ignore all tar.gz files to avoid committing large binaries
 *.tar.gz
 # Explicitly allow the source runtime in assets
-!src/main/assets/*.tar.gz
+src/main/assets/core_runtime.n8n
 
 # ==============================================================================
 # n8n Server & User Data
