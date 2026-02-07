@@ -50,7 +50,6 @@ jobs:
         with:
           name: n8n-android-full-package
           path: |
-            src/main/assets/core_runtime.n8n
             **/build/outputs/apk/release/*.apk
           retention-days: 5
 
@@ -59,7 +58,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            src/main/assets/core_runtime.n8n
             **/build/outputs/apk/release/*.apk
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
