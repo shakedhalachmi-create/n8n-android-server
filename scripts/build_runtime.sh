@@ -222,7 +222,10 @@ log_success "Archive created: $(du -sh "$TARGET_TARBALL" | awk '{print $1}')"
 # Verification
 log_step "Verifying Archive"
 log_detail "Contents preview:"
-tar -tf "$TARGET_TARBALL" | head -n 10
+# pipefail can cause the script to fail if head closes the pipe early
+set +o pipefail
+tar -tf "$TARGET_TARBALL" | head -n 10 || true
+set -o pipefail
 
 log_footer
 echo "    Output: $TARGET_TARBALL"

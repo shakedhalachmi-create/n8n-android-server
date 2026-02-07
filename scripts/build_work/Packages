@@ -28971,6 +28971,21 @@ Description: Static libraries for oniguruma
 Homepage: https://github.com/kkos/oniguruma
 
 Package: onnxruntime
+Installed-Size: 20128
+Maintainer: @termux
+Architecture: aarch64
+Version: 1.24.1
+Depends: abseil-cpp, libc++, protobuf, libre2
+Filename: pool/main/o/onnxruntime/onnxruntime_1.24.1_aarch64.deb
+Size: 4201576
+MD5sum: 7213e382f60c68e4ec0c6b948cd8ec7e
+SHA1: ec315ed4df2b1a6deaca7c28576349a331ae4065
+SHA256: a0941a1e07a433dd30e7eb2019f0a77c3114bc5bfd160b6e705075ddb391891b
+SHA512: 1a2bf6c05febc81b6a6f61c62c0242666cbfc39e441f81293b4a7b53d6935211d676fae3d59a0b03534a4e23c2a35c6730421e8d0a08462e248ddbe0924d165f
+Description: Cross-platform, high performance ML inferencing and training accelerator
+Homepage: https://onnxruntime.ai/
+
+Package: onnxruntime
 Installed-Size: 19220
 Maintainer: @termux
 Architecture: aarch64
@@ -32330,6 +32345,21 @@ SHA256: 68a70cbfb5dba64a1307f64e65b2f3665040cb208481fa2ee06ee5054160fde1
 SHA512: aed742605752a2b53f825852a596f9ee5abb11a91a121e145f2da609637f8b04cd8c2e46852435157065fa990ad9ace1b394c84d9eb3533a06975d4a6f213448
 Description: Static libraries for python-numpy
 Homepage: https://numpy.org/
+
+Package: python-onnxruntime
+Installed-Size: 44572
+Maintainer: @termux
+Architecture: aarch64
+Version: 1.24.1
+Depends: python, python-numpy, python-pip, abseil-cpp, libc++, protobuf, libre2
+Filename: pool/main/p/python-onnxruntime/python-onnxruntime_1.24.1_aarch64.deb
+Size: 8953096
+MD5sum: 21ee979a5ca8d0390db31b5f6514545d
+SHA1: 1bcf3703c62299b8cb80a3c36b0e3dcc4dbedc17
+SHA256: 88853e7f4fb5cf3140ff00e0697d6ecc8fd8ab74193d55b4bd309230bfbe9bf4
+SHA512: c3a1c7315c81d56b314e4e9e386f75d9fd95067ed4692d1117cd14f58c9ad0234084d17e08e65532bc345ebff98c43d2ab249b85a77c596971760d0400d9d9d2
+Description: Cross-platform, high performance ML inferencing and training accelerator (Python bindings)
+Homepage: https://onnxruntime.ai/
 
 Package: python-onnxruntime
 Installed-Size: 42848
@@ -40593,6 +40623,21 @@ SHA256: 5c0d7c816969173cd89950c687dbf6e838bda3a03b19386b7eb0a58fa22bb8e3
 SHA512: 68ab41be6a5c2ab222ebf1895bc8ce6abe6334244eb3bc14dfe8d5c4d881affa3fbf82cd89116bad1f80d848d032b53b0931ba5a38a775df90882432b1a02dc2
 Description: Ogg Vorbis tools
 Homepage: https://github.com/xiph/vorbis-tools
+
+Package: vtm
+Installed-Size: 6132
+Maintainer: @termux
+Architecture: aarch64
+Version: 2026.02.05
+Depends: freetype, harfbuzz, libc++, lua54
+Filename: pool/main/v/vtm/vtm_2026.02.05_aarch64.deb
+Size: 1153888
+MD5sum: d1efc9a2c7f6137a0370b20522bb9f61
+SHA1: 969ed8a95ba94f08cc85603ddfe8db540f4f2af0
+SHA256: 297c86b15acf8960e2693b1c5f43dc0dc739548b829b7191862d0b1aeddba280
+SHA512: 0cd2a09f4e592514d5a1161aba5251575735942f4c9956d97732af0ac528db1816e60d4f64dd381e8c9e8b2a817c9a299d3c90d66a25b16a6cfa3ce72d06877b
+Description: Terminal multiplexer with TUI window manager and multi-party session sharing
+Homepage: https://github.com/directvt/vtm
 
 Package: vtm
 Installed-Size: 6112
