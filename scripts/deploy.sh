@@ -48,10 +48,6 @@ for arg in "$@"; do
             MODE_SPECIFIED=true
             shift
             ;;
-        --push|-p)
-            DO_PUSH=true
-            shift
-            ;;
         *)
             if [[ "$arg" != -* ]] && [[ -z "$DEVICE" ]]; then
                 DEVICE="$arg"
@@ -166,17 +162,6 @@ if [ "$DO_APK" = true ]; then
     fi
 else
     echo "--- Skipping APK Update ---"
-fi
-
-# 6. Git Push
-if [ "$DO_PUSH" = true ]; then
-    echo "--- [6/6] Pushing to GitHub ---"
-    git add .
-    echo "Enter commit message:"
-    read -r COMMIT_MSG
-    git commit -m "$COMMIT_MSG"
-    git push
-    echo "Pushed to GitHub."
 fi
 
 echo "=============================================="

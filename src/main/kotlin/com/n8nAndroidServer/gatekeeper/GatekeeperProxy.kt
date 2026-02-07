@@ -37,7 +37,7 @@ class GatekeeperProxy(private val context: Context) {
     companion object {
         private const val TAG = "GatekeeperProxy"
         private const val BACKEND_HOST = "127.0.0.1"
-        private const val BACKEND_PORT = 5679
+        private const val BACKEND_PORT = 5681
     }
     
     private val httpClient = HttpClient(CIO) {

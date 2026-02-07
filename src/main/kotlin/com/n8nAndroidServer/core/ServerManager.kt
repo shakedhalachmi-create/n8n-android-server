@@ -26,7 +26,7 @@ class ServerManager private constructor(
 
     companion object {
         private const val TAG = "ServerManager"
-        private const val PORT = "5679"
+        private const val PORT = "5681"
 
         @Volatile
         private var INSTANCE: ServerManager? = null
@@ -91,12 +91,25 @@ class ServerManager private constructor(
         }
     }
 
+    private val isStarting = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    @Synchronized
     fun startServer() {
-        if (_state.value == ServerState.RUNNING || _state.value == ServerState.STARTING) return
+        if (!isStarting.compareAndSet(false, true)) {
+             Log.d(TAG, "startServer ignored: Race condition or already starting")
+             return
+        }
+
+        if (_state.value == ServerState.RUNNING || _state.value == ServerState.STARTING) {
+            Log.d(TAG, "startServer ignored: already ${state.value}")
+            isStarting.set(false)
+            return
+        }
+        
+        _state.value = ServerState.STARTING
         
         processJob = scope.launch {
             try {
-                _state.value = ServerState.STARTING
                 logToUi("Initializing Server Startup...")
                 
                 // 0. Cleanup Previous Processes
@@ -104,6 +117,7 @@ class ServerManager private constructor(
 
                 // 1. Install / Verify Runtime
                 if (!installRuntime()) {
+                    isStarting.set(false)
                     return@launch
                 }
                 
@@ -116,6 +130,7 @@ class ServerManager private constructor(
                 if (encryptionKey == null) {
                     logToUi("FATAL: Encryption key generation failed.")
                     _state.value = ServerState.FATAL_ERROR
+                    isStarting.set(false)
                     return@launch
                 }
                 
@@ -139,6 +154,9 @@ class ServerManager private constructor(
 
                 logToUi("Launching n8n process...")
                 currentProcess = processRunner.start(command, env, userDataDir)
+                // Reset startup lock once process is actually launched
+                isStarting.set(false)
+
                 logToUi("Process started (PID: ${currentProcess?.pid()}). Waiting for port $PORT...")
                 
                 // 5. Stream Consumption
@@ -155,7 +173,7 @@ class ServerManager private constructor(
                 // 7. Port Polling (Max 45s)
                 var portReady = false
                 val startTime = System.currentTimeMillis()
-                while (System.currentTimeMillis() - startTime < 45000) { // 45s timeout
+                while (System.currentTimeMillis() - startTime < 90000) { // 45s timeout
                     if (currentProcess?.isAlive() != true) {
                         logToUi("Process died unexpectedly.")
                         break 
@@ -190,10 +208,12 @@ class ServerManager private constructor(
             } catch (e: CancellationException) {
                 logToUi("Server process cancelled.")
                 _state.value = ServerState.STOPPED
+                isStarting.set(false)
             } catch (e: Exception) {
                 logToUi("FATAL EXCEPTION: ${e.message}")
                 Log.e(TAG, "Error starting server", e)
                 _state.value = ServerState.FATAL_ERROR
+                isStarting.set(false)
             }
         }
     }
@@ -278,10 +298,10 @@ class ServerManager private constructor(
         env["N8N_USER_FOLDER"] = userDataDir.absolutePath
         env["LD_LIBRARY_PATH"] = File(runtimeRoot, "lib").absolutePath
         env["PATH"] = "${File(runtimeRoot, "bin").absolutePath}:${System.getenv("PATH")}"
-        env["OPENSSL_CONF"] = File(runtimeRoot, "etc/tls/openssl.cnf").absolutePath
+        env["OPENSSL_CONF"] = "/dev/null" // Force ignore system OpenSSL
         env["N8N_PORT"] = PORT
         env["N8N_HOST"] = "127.0.0.1"
-        env["N8N_LISTEN_ADDRESS"] = "127.0.0.1"
+        env["N8N_LISTEN_ADDRESS"] = "0.0.0.0"
         env["N8N_ENCRYPTION_KEY"] = encryptionKey
         env["DB_TYPE"] = "sqlite"
         env["NODE_OPTIONS"] = "--max-old-space-size=512" 
@@ -292,6 +312,14 @@ class ServerManager private constructor(
         // Timezone Sync
         val timeZone = java.util.TimeZone.getDefault().id
         env["GENERIC_TIMEZONE"] = timeZone
+        
+        // Android Optimization / Singularity
+        // Disable Task Runners (separate processes) to prevent port conflicts
+        
+        // New Method (v1.7 fix)
+        env["N8N_BLOCK_JS_EXECUTION_PROCESS"] = "true"
+        env["N8N_DISABLE_PYTHON_NODE"] = "true"
+        env["N8N_TASKS_EVALUATOR_PROCESS"] = "main"
         
         // Dynamic Dev Mode
         env["NODE_ENV"] = if (isSmartUpdateEnabled.value) "development" else "production"
@@ -374,36 +402,60 @@ class ServerManager private constructor(
     }
 
     fun killExistingNodeProcesses() {
-        logToUi("Cleaning up existing processes...")
+        logToUi("Process Cleanup: Starting...")
         try {
             val runtime = Runtime.getRuntime()
-            
-            // method 1: pkill
-            try {
-                runtime.exec(arrayOf("pkill", "-9", "node")).waitFor()
-            } catch (e: Exception) {}
+            var killedCount = 0
 
-            // method 2: killall
-            try {
-                runtime.exec(arrayOf("killall", "-9", "node")).waitFor()
-            } catch (e: Exception) {}
+            // Method A: Built-in shell commands (simple try)
+            val commands = listOf("pkill -9 node", "killall -9 node")
+            for (cmd in commands) {
+                try {
+                    val p = runtime.exec(arrayOf("/system/bin/sh", "-c", cmd))
+                    p.waitFor()
+                } catch (e: Exception) {
+                    // Ignore, move to next
+                }
+            }
 
-            // method 3: pidof + kill
+            // Method B: Robust PS Parsing (The real fix)
+            // ps -A outputs: USER PID PPID VSIZE RSS WCHAN PC NAME
             try {
-                val pidProcess = runtime.exec(arrayOf("pidof", "node"))
-                val pidOutput = pidProcess.inputStream.bufferedReader().readText().trim()
-                if (pidOutput.isNotEmpty()) {
-                    val pids = pidOutput.split("\\s+".toRegex())
-                    for (pid in pids) {
-                        if (pid.isNotEmpty()) {
-                            runtime.exec(arrayOf("kill", "-9", pid)).waitFor()
+                val p = runtime.exec(arrayOf("/system/bin/ps", "-A"))
+                val output = p.inputStream.bufferedReader().use { it.readText() }
+                p.waitFor()
+
+                // DEBUG: Log all node-like lines to see what we're missing
+                val nodeLines = output.lines().filter { it.contains("node") || it.contains("n8n") }
+                if (nodeLines.isNotEmpty()) {
+                     Log.d(TAG, "PS DEBUG: Found potential node processes:\n${nodeLines.joinToString("\n")}")
+                }
+
+                output.lines().forEach { line ->
+                    if (line.contains("runtime/bin/node") || (line.contains("node") && line.contains("n8n"))) {
+                        // Extract PID (2nd column usually, but split by whitespace handles it)
+                        val parts = line.trim().split("\\s+".toRegex())
+                        if (parts.size > 1) {
+                            val pidStr = parts[1]
+                            // Verify it's a number
+                            if (pidStr.all { it.isDigit() }) {
+                                Log.i(TAG, "Found zombie node process: $pidStr. Killing...")
+                                runtime.exec(arrayOf("kill", "-9", pidStr)).waitFor()
+                                killedCount++
+                            }
                         }
                     }
                 }
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                Log.e(TAG, "PS parsing failed", e)
+            }
             
+            logToUi("Process Cleanup: Killed $killedCount zombie processes.")
+            if (killedCount > 0) Thread.sleep(500) // Wait for OS to release ports
+
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to kill existing processes", e)
+            Log.e(TAG, "General cleanup failure", e)
+            logToUi("Process Cleanup: Failed (${e.message})")
         }
     }
 }

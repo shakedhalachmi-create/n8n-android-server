@@ -36,6 +36,7 @@ mkdir -p "$BUILD_WORK_DIR"
 mkdir -p "$OUTPUT_RUNTIME_DIR/bin"
 mkdir -p "$OUTPUT_RUNTIME_DIR/lib"
 mkdir -p "$OUTPUT_RUNTIME_DIR/lib/node_modules"
+mkdir -p "$OUTPUT_RUNTIME_DIR/etc"
 mkdir -p "$OUTPUT_ASSETS_DIR"
 
 cd "$BUILD_WORK_DIR" || exit 1
@@ -80,6 +81,8 @@ for pkg in "${PACKAGES[@]}"; do
     cp -r temp_extract/data/data/com.termux/files/usr/bin/* "$OUTPUT_RUNTIME_DIR/bin/" 2>/dev/null || true
     # Termux layout: data/data/com.termux/files/usr/lib -> runtime/lib
     cp -r temp_extract/data/data/com.termux/files/usr/lib/* "$OUTPUT_RUNTIME_DIR/lib/" 2>/dev/null || true
+    # Termux layout: data/data/com.termux/files/usr/etc -> runtime/etc
+    cp -r temp_extract/data/data/com.termux/files/usr/etc/* "$OUTPUT_RUNTIME_DIR/etc/" 2>/dev/null || true
     
     rm -rf temp_extract data.tar.xz
 done
@@ -253,7 +256,32 @@ find "$OUTPUT_RUNTIME_DIR" -name "*.node" | while read -r node_mod; do
     patch_elf_file "$node_mod"
 done
 
-# 8. Bootstrap Script
+# 8. Node Wrapper Shim (Crucial for Child Processes)
+echo ">>> Creating Node Wrapper Shim..."
+# Rename real binary
+mv "$OUTPUT_RUNTIME_DIR/bin/node" "$OUTPUT_RUNTIME_DIR/bin/node_bin"
+
+# Create wrapper
+cat <<'EOS' > "$OUTPUT_RUNTIME_DIR/bin/node"
+#!/system/bin/sh
+# Node Shim: Injects LD_LIBRARY_PATH for all processes (including child runners)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RUNTIME_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+unset LD_PRELOAD
+export LD_LIBRARY_PATH="$RUNTIME_ROOT/lib:$LD_LIBRARY_PATH"
+export OPENSSL_CONF="/dev/null"
+export NODE_OPTIONS="--max-old-space-size=512"
+
+# Fix runners
+export N8N_BLOCK_JS_EXECUTION_PROCESS=true
+export N8N_DISABLE_PYTHON_NODE=true
+
+exec "$SCRIPT_DIR/node_bin" "$@"
+EOS
+chmod +x "$OUTPUT_RUNTIME_DIR/bin/node"
+
+# 9. Bootstrap Script
 echo ">>> Creating Bootstrap Script..."
 cat <<'EOS' > "$OUTPUT_RUNTIME_DIR/bin/n8n-start.sh"
 #!/system/bin/sh
@@ -267,11 +295,17 @@ export PWD=$N8N_USER_FOLDER
 export TMPDIR=${TMPDIR:-$N8N_USER_FOLDER/cache}
 
 # Critical: Library Path (Points to internal lib/)
+unset LD_PRELOAD
 export LD_LIBRARY_PATH="$RUNTIME_ROOT/lib:$LD_LIBRARY_PATH"
+export OPENSSL_CONF="/dev/null"
 
 # Node Config
 export NODE_OPTIONS="--max-old-space-size=512"
 export N8N_LOG_LEVEL=info
+
+# Fix runners
+export N8N_BLOCK_JS_EXECUTION_PROCESS=true
+export N8N_DISABLE_PYTHON_NODE=true
 
 # Launch n8n
 # Note: We use the patched node binary from our runtime
