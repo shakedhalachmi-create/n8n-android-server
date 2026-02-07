@@ -235,3 +235,8 @@ Launch an Android Intent directly. Supports detailed parameters including `class
 **Symptom**: `EACCES` when running node.
 **Cause**: Android restricts execution from `/sdcard` or external storage.
 **Fix**: The runtime must be extracted to `context.filesDir` (internal storage), which has execute permissions. The `RuntimeInstaller` handles this automatically.
+
+## 📜 Credits & License
+* **n8n Core:** [n8n.io](https://n8n.io) - Distributed under the Fair-code License.
+* **Node.js Runtime:** Built using resources from the [Termux](https://termux.dev/) project.
+* **Project Creator:** [shaked halachmi]
