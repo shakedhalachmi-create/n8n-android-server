@@ -6468,21 +6468,6 @@ SHA512: 97374e8a2588482de26aeb1c512b8e32fa3523a3851bbbdd14dcbc8253f32632fe7163ac
 Description: Full-Featured Text WWW Browser
 Homepage: https://github.com/rkd77/elinks
 
-Package: elinks
-Installed-Size: 1384
-Maintainer: @termux
-Architecture: aarch64
-Version: 0.19.0-1
-Depends: libandroid-execinfo, libexpat, libiconv, libidn, openssl, libbz2, zlib
-Filename: pool/main/e/elinks/elinks_0.19.0-1_aarch64.deb
-Size: 415328
-MD5sum: 3bd86a8d075e02cf32749e291ac26743
-SHA1: cf725627f64902aeba8f08aa7cbdf17f76046b8e
-SHA256: 109f6cf5d0231af656ce6caa104132fb9a24c1a11f9ddde9b4d36603561573aa
-SHA512: a22f7d1c12188293b8f418c4d191d60af4d7cb9a83cc16c9fda9d381b78026ab527eaeab63d6dfe4a4488a50574e9466c101e80da1ee9731cf2bc4fce9548a8f
-Description: Full-Featured Text WWW Browser
-Homepage: https://github.com/rkd77/elinks
-
 Package: elixir
 Installed-Size: 15900
 Maintainer: @termux
@@ -12831,22 +12816,6 @@ MD5sum: b944d1f505753519381278cfc32a7e1c
 SHA1: 1813b037e9fe7409264c6000dd312edf15337b1d
 SHA256: e5fd775309d92449cc832813e0dc23541fe6dde523db9ae723454cc3dab451f1
 SHA512: 5540b8136c8f723e604b64b9bbf9276bdb47d46b27f714216ae7fc3d764f1db173e81012d4fc1e36c8044363a66ebe06b6331e41cebf863a8017d3d26e7becaf
-Description: Simple terminal UI for git commands
-Homepage: https://github.com/jesseduffield/lazygit
-
-Package: lazygit
-Installed-Size: 22592
-Maintainer: Krishna kanhaiya @kcubeterm
-Architecture: aarch64
-Version: 0.58.1
-Recommends: git
-Suggests: diff-so-fancy
-Filename: pool/main/l/lazygit/lazygit_0.58.1_aarch64.deb
-Size: 5235940
-MD5sum: 32491cbf658d032d3ce583f1143f26db
-SHA1: 876fcdec126f53d8cf5e7f74a585459f7037eae8
-SHA256: 5f03fe637dabf6b35a91afe45b27dd40d506c7bd79722833375c8efdd930ed23
-SHA512: 5c972f45ee919b57cbf7c3cafe1709c0a120eedbcefb61d2a3919d555b40e5c655c6ae9e1883da4c68fe0e8fc35ff9fe0ba92b6fe5b47cf139fb8d0a41d552df
 Description: Simple terminal UI for git commands
 Homepage: https://github.com/jesseduffield/lazygit
 
@@ -28896,6 +28865,22 @@ SHA256: 4a01a88c9275f7f317165ad62e79192d5fe7d0c074b32db58b1212ac13ee5e1a
 SHA512: 0f4f972d3a410a7fdef5b558deeff2b58f05ac079e8248fcf02cf99fb64b834b1390e25f245f9220cc72546193c196a5de350fe6b01a9a15fee83bdd7249b33d
 Description: Vulkan Backend for Ollama
 Homepage: https://ollama.com/
+
+Package: oma
+Installed-Size: 16356
+Maintainer: @termux
+Architecture: aarch64
+Version: 1.23.5
+Depends: libnettle, apt
+Recommends: ripgrep
+Filename: pool/main/o/oma/oma_1.23.5_aarch64.deb
+Size: 5009580
+MD5sum: 9bfde696dd3ac21b2032d0a27a7b3537
+SHA1: 25972d1d3c4953f4ed76dbf0d199bdb937d95433
+SHA256: 1215dbd2de4bb57beef6faf3c71acc745e7952f455d1cfc36894c4ed06a06fae
+SHA512: a47f1b83b845e20a7f227b459e47c529cf20c2b90118967a43644fe75bb4e4e92684c23f199347a6a2743c571854f5c78302cb5e381ce1de348d7215b789cd64
+Description: oma is an attempt at reworking APT's interface
+Homepage: https://aosc.io/oma
 
 Package: oma
 Installed-Size: 16356

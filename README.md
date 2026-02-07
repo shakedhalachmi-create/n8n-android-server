@@ -1,38 +1,23 @@
 # n8n Android Server
 
-**Turn your spare Android phone into a powerful, dedicated home automation hub.**
+**A self-contained, n8n instance running natively on Android.**
 
-This project enables you to run a full n8n instance natively on Android. It is a stable, robust solution designed for DIY enthusiasts who want to repurpose existing hardware for private, local automation without relying on the cloud or always-on PCs.
-
-## Core Function
-The **n8n Android Server** utilizes a custom-built environment to host n8n directly on your device. It includes a specialized bridge that allows your workflows to interact with the Android system—sending intents, controlling media, or managing connectivity—all from within n8n.
-
-## The Development Journey & Challenges
-
-Integrating isolated Android and Node.js components into a unified mobile environment necessitated a rigorous architectural approach. This project represents the systematic fusion of disparate technologies into a cohesive, high-performance ecosystem designed to function seamlessly on mobile hardware.
-
-### Technical Hurdles
--   **The Integration Puzzle**: Bridging the gap between the high-level n8n automation layer and the low-level Android system required constant decision-making on which generic tools to adapt and which custom bridges to build.
--   **The Linker Breakthrough**: One of the most significant roadblocks was ensuring database stability. We had to manually intervene in the library linking process, using `LD_DEBUG` to trace and resolve complex dependency issues that prevented the native `sqlite3` driver from loading. By manually injecting the pre-compiled `node_sqlite3-android-arm64.node` binary and patching the runtime's internal paths, we bypassed the limitations of standard cross-compilation.
--   **System Constraints**: Managing Android’s aggressive background process policies meant implementing a custom Stability Wizard to ensure the server remains active on a spare device 24/7.
-
-### The AI Advantage
-This project is a clear example of the multiplier effect of AI-assisted development. LLMs didn't just help with syntax; they acted as a high-level consultant for:
--   **Architecture Discovery**: Rapidly evaluating which generic Android components could be repurposed for the System Dispatcher.
--   **Deep Diagnostics**: Interpreting obscure Linker logs and tracing library loading failures that typically require years of systems-level experience.
--   **Protocol Bridging**: Seamlessly connecting Ktor-based APIs with n8n's internal command structures.
-
-It represents a new era where complex systems engineering is accessible to determined creators supported by AI.
+Turn your spare Android device into a powerful, privacy-focused home automation hub. The server runs entirely on-device, bridging n8n workflows with Android system capabilities like intents, notifications, and hardware control.
 
 ---
 
-## Collaboration & Contact
+## Architecture: Bundled Assets
 
-This project currently serves my personal home automation needs, but it is built to be shared. There is immense potential for expansion—supporting more system events, optimizing performance, or adding new bridge capabilities.
+Unlike last version that download runtimes on first launch, this project uses a **Bundled Asset Architecture**.
 
-If you are interested in collaborating, forking, or just want to discuss the implementation, I'd love to hear from you.
+-   **Self-Contained**: The Node.js runtime, n8n core, and native dependencies are pre-built and packaged directly into the APK as a compressed archive (`core_runtime.n8n`).
+-   **Security & Stability**: No runtime downloads means no external dependency failures, no checksum mismatches, and guaranteed consistent environments across installs.
+-   **Offline First**: The application can be installed and started without an internet connection.
 
-**Contact**: `shaked.halachmi@gmail.com`
+### Core Components
+1.  **The Runtime Archive**: A custom `.tar.gz` containing a patched Node.js binary, n8n `node_modules`, and Android-compatible shared libraries (`.so` files patched with `patchelf`).
+2.  **Runtime Installer**: On first launch, the app extracts this archive from `assets/` to the app's internal private storage (`/data/user/0/.../files/runtime`).
+3.  **Process Supervisor**: Manages the Node.js process, converting Android lifecycle events into graceful start/stop commands.
 
 ---
 
@@ -223,25 +208,30 @@ Launch an Android Intent directly. Supports detailed parameters including `class
 
 ---
 
-## Build & Deployment
+## Internal Workflow: First Launch
 
-### Build System (`scripts/build_runtime.sh`)
-The custom build script handles the complexity of creating an Android-compatible runtime:
-1.  Downloads packages from Termux APT.
-2.  Patches n8n source for Android compatibility (Task Broker, Binary Paths).
-3.  Injects the critical `node_sqlite3-android-arm64.node` asset.
-
-### Requirements
--   **Architecture**: ARM64 (aarch64) only.
--   **OS**: Android 12 or newer recommended.
--   **Hardware**: 4GB+ RAM suggested for stable operation.
-
-### CI/CD
-Automated via `.github/workflows/build.yml`. Pushes to `main` generate the `n8n-android-arm64.tar.gz` runtime artifact.
+1.  **Validation**: The app checks if `/files/runtime/bin/node` exists and is executable.
+2.  **Extraction**: If missing or outdated, `RuntimeInstaller` streams the `core_runtime.n8n` asset from the APK to a temporary directory.
+3.  **Atomic Swap**: The temporary directory is renamed to `runtime`, ensuring a complete installation or none at all.
+4.  **Bootstrap**: The app executes `scripts/bin/n8n-start.sh`, which sets up `LD_LIBRARY_PATH` and launches Node.js.
 
 ---
 
-## Stability Notes
-To ensure the server runs 24/7:
--   Use the in-app **Stability Wizard** to grant Overlay and Battery exemptions.
--   The app runs as a Foreground Service to prevent the OS from killing it during sleep.
+## Troubleshooting
+
+### OpenSSL & SSL Failures
+**Symptom**: `error:2500006F:DSO support routines:dso_new:unknown error`
+**Cause**: Android's OpenSSL tries to load host configuration files (like `/system/etc/ssl/openssl.cnf`) which are incompatible or inaccessible.
+**Fix**: The app automatically sets the environment variable `OPENSSL_CONF=/dev/null` in `EnvironmentBuilder.kt` to disable config loading.
+
+### Port Conflicts
+**Symptom**: `EADDRINUSE`
+**Cause**: n8n tries to launch subprocesses for task execution, which conflict on Android's single-user ports.
+**Fix**:
+-   `N8N_PORT` is set to `5681` (internal).
+-   `N8N_BLOCK_JS_EXECUTION_PROCESS=true` forces n8n to run tasks in the main process.
+
+### Permission Denied (Exec)
+**Symptom**: `EACCES` when running node.
+**Cause**: Android restricts execution from `/sdcard` or external storage.
+**Fix**: The runtime must be extracted to `context.filesDir` (internal storage), which has execute permissions. The `RuntimeInstaller` handles this automatically.
