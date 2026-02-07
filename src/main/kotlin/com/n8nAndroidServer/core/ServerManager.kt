@@ -373,9 +373,16 @@ class ServerManager private constructor(
     private fun startStreamConsumption() {
         processSupervisor.getInputStream()?.let { stream ->
             scope.launch(Dispatchers.IO) {
-                stream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                        logBridge.fromNodeProcess(line, isError = false)
+                try {
+                    stream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            logBridge.fromNodeProcess(line, isError = false)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Ignore stream interruption during shutdown
+                    if (state.value != LegacyServerState.STOPPING && state.value != LegacyServerState.STOPPED) {
+                         Log.w(TAG, "Stream consumption error", e)
                     }
                 }
             }
@@ -383,9 +390,16 @@ class ServerManager private constructor(
         
         processSupervisor.getErrorStream()?.let { stream ->
             scope.launch(Dispatchers.IO) {
-                stream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                        logBridge.fromNodeProcess(line, isError = true)
+                try {
+                    stream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            logBridge.fromNodeProcess(line, isError = true)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Ignore stream interruption during shutdown
+                    if (state.value != LegacyServerState.STOPPING && state.value != LegacyServerState.STOPPED) {
+                         Log.w(TAG, "Error stream consumption error", e)
                     }
                 }
             }
