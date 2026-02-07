@@ -26,7 +26,7 @@ class ServerManager private constructor(
 
     companion object {
         private const val TAG = "ServerManager"
-        private const val PORT = "5679"
+        private const val PORT = "5681"
 
         @Volatile
         private var INSTANCE: ServerManager? = null
@@ -59,88 +59,22 @@ class ServerManager private constructor(
     val downloadProgress: StateFlow<Float> = _downloadProgress.asStateFlow()
 
     /**
-     * Smart Update Flow:
-     * 1. Check Metadata
-     * 2. Check Installed Version (Skip if match)
-     * 3. Check Cache (Install if match)
-     * 4. Download (Last resort)
+     * Installs or updates the runtime from assets.
      */
-    suspend fun checkAndInstallRuntime(trustCache: Boolean = false): Boolean {
-        // 1. Fetch Metadata
-        val metadata = RuntimeDownloader.getLatestMetadata()
-        if (metadata == null) {
-            Log.e(TAG, "Failed to fetch metadata")
-            return RuntimeInstaller.isRuntimeAvailable(context)
-        }
-        val remoteHash = metadata.sha256
-
-        // 2. Check Installed Version
-        _state.value = ServerState.VERIFYING_CACHE
-        val installedHash = RuntimeInstaller.getInstalledHash(context)
-        if (installedHash != null && installedHash.equals(remoteHash, ignoreCase = true)) {
-            Log.i(TAG, "System is up to date.")
-            if (!trustCache) {
-                 if (_state.value != ServerState.RUNNING) _state.value = ServerState.STOPPED
-                 return true
-            }
-        }
-
-        // 3. Check Local Cache
-        val cacheDir = context.externalCacheDir ?: context.cacheDir
-        val archiveFile = File(cacheDir, "n8n-android-arm64.tar.gz")
-
-        if (archiveFile.exists()) {
-             // ... (Keep existing cache logic, just ensure state transitions are correct) ...
-             // Simplified for brevity in this replacement, assuming inner logic is mostly same but ensuring INSTALLING state
-             val cachedHash = RuntimeDownloader.calculateSha256(archiveFile)
-             if (cachedHash.equals(remoteHash, ignoreCase = true) || trustCache) {
-                 _state.value = ServerState.INSTALLING
-                 _downloadProgress.value = 1.0f
-                 val installed = RuntimeInstaller.installFromArchive(context, archiveFile, remoteHash, verifyIntegrity = false)
-                 if (installed) _state.value = ServerState.STOPPED else _state.value = ServerState.NOT_INSTALLED
-                 return installed
-             } else {
-                 archiveFile.delete()
-             }
-        }
+    suspend fun installRuntime(): Boolean {
+        _state.value = ServerState.INSTALLING
+        logToUi("Verifying Runtime Assets...")
         
-        // 4. Download
-        _state.value = ServerState.DOWNLOADING
-        logToUi("Downloading runtime...")
-        try {
-            _downloadProgress.value = 0.01f
-            val downloaded = RuntimeDownloader.downloadRuntime(
-                metadata.downloadUrl,
-                archiveFile,
-                remoteHash
-            ) { progress ->
-                _downloadProgress.value = progress
-            }
-            
-            if (!downloaded) {
-                logToUi("Download failed.")
-                _state.value = ServerState.NOT_INSTALLED
-                return false
-            }
-            
-            _state.value = ServerState.INSTALLING
-            logToUi("Installing runtime...")
-            _downloadProgress.value = 1.0f 
-            
-            val installed = RuntimeInstaller.installFromArchive(context, archiveFile, remoteHash, verifyIntegrity = false)
-            if (installed) {
-                logToUi("Installation complete.")
+        return withContext(Dispatchers.IO) {
+            val success = RuntimeInstaller.installFromAssets(context)
+            if (success) {
+                logToUi("Runtime ready.")
                 _state.value = ServerState.STOPPED
             } else {
-                logToUi("Installation failed.")
-                _state.value = ServerState.NOT_INSTALLED
+                logToUi("FATAL: Runtime installation failed.")
+                _state.value = ServerState.FATAL_ERROR
             }
-            return installed
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Install failed", e)
-             _state.value = ServerState.FATAL_ERROR
-            return false
+            success
         }
     }
 
@@ -157,26 +91,38 @@ class ServerManager private constructor(
         }
     }
 
+    private val isStarting = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    @Synchronized
     fun startServer() {
-        if (_state.value == ServerState.RUNNING || _state.value == ServerState.STARTING) return
+        if (!isStarting.compareAndSet(false, true)) {
+             Log.d(TAG, "startServer ignored: Race condition or already starting")
+             return
+        }
+
+        if (_state.value == ServerState.RUNNING || _state.value == ServerState.STARTING) {
+            Log.d(TAG, "startServer ignored: already ${state.value}")
+            isStarting.set(false)
+            return
+        }
+        
+        _state.value = ServerState.STARTING
         
         processJob = scope.launch {
             try {
-                _state.value = ServerState.STARTING
                 logToUi("Initializing Server Startup...")
+                
+                // 0. Cleanup Previous Processes
+                killExistingNodeProcesses()
 
-                // 0. Update/Install Check
-                if (!ensureBinariesExist()) {
-                    logToUi("Runtime not found. Initiating auto-install...")
-                    val success = checkAndInstallRuntime(trustCache = isSmartUpdateEnabled.value)
-                    if (!success) {
-                        logToUi("Auto-install failed. Aborting.")
-                        _state.value = ServerState.NOT_INSTALLED
-                        return@launch
-                    }
-                    // If install success, state is STOPPED. Set back to STARTING to proceed.
-                    _state.value = ServerState.STARTING
+                // 1. Install / Verify Runtime
+                if (!installRuntime()) {
+                    isStarting.set(false)
+                    return@launch
                 }
+                
+                // If install success, state might be STOPPED. Set back to STARTING.
+                _state.value = ServerState.STARTING
                 
                 // 2. Prepare Environment
                 logToUi("Preparing environment...")
@@ -184,6 +130,7 @@ class ServerManager private constructor(
                 if (encryptionKey == null) {
                     logToUi("FATAL: Encryption key generation failed.")
                     _state.value = ServerState.FATAL_ERROR
+                    isStarting.set(false)
                     return@launch
                 }
                 
@@ -192,9 +139,12 @@ class ServerManager private constructor(
                 // 3. Command construction
                 val n8nEntry = File(runtimeRoot, "lib/node_modules/n8n/bin/n8n")
                 val bootstrapScript = File(runtimeRoot, "bin/n8n-start.sh")
+                
+                // Use bootstrap script which handles LD_LIBRARY_PATH and execution
                 val command = if (bootstrapScript.exists()) {
                     listOf("/system/bin/sh", bootstrapScript.absolutePath)
                 } else {
+                    // Fallback (Should typically not happen with new installer)
                     listOf(nodeBin.absolutePath, n8nEntry.absolutePath, "start")
                 }
 
@@ -204,6 +154,9 @@ class ServerManager private constructor(
 
                 logToUi("Launching n8n process...")
                 currentProcess = processRunner.start(command, env, userDataDir)
+                // Reset startup lock once process is actually launched
+                isStarting.set(false)
+
                 logToUi("Process started (PID: ${currentProcess?.pid()}). Waiting for port $PORT...")
                 
                 // 5. Stream Consumption
@@ -220,7 +173,7 @@ class ServerManager private constructor(
                 // 7. Port Polling (Max 45s)
                 var portReady = false
                 val startTime = System.currentTimeMillis()
-                while (System.currentTimeMillis() - startTime < 45000) { // 45s timeout
+                while (System.currentTimeMillis() - startTime < 90000) { // 45s timeout
                     if (currentProcess?.isAlive() != true) {
                         logToUi("Process died unexpectedly.")
                         break 
@@ -255,10 +208,12 @@ class ServerManager private constructor(
             } catch (e: CancellationException) {
                 logToUi("Server process cancelled.")
                 _state.value = ServerState.STOPPED
+                isStarting.set(false)
             } catch (e: Exception) {
                 logToUi("FATAL EXCEPTION: ${e.message}")
                 Log.e(TAG, "Error starting server", e)
                 _state.value = ServerState.FATAL_ERROR
+                isStarting.set(false)
             }
         }
     }
@@ -343,10 +298,10 @@ class ServerManager private constructor(
         env["N8N_USER_FOLDER"] = userDataDir.absolutePath
         env["LD_LIBRARY_PATH"] = File(runtimeRoot, "lib").absolutePath
         env["PATH"] = "${File(runtimeRoot, "bin").absolutePath}:${System.getenv("PATH")}"
-        env["OPENSSL_CONF"] = File(runtimeRoot, "etc/tls/openssl.cnf").absolutePath
+        env["OPENSSL_CONF"] = "/dev/null" // Force ignore system OpenSSL
         env["N8N_PORT"] = PORT
         env["N8N_HOST"] = "127.0.0.1"
-        env["N8N_LISTEN_ADDRESS"] = "127.0.0.1"
+        env["N8N_LISTEN_ADDRESS"] = "0.0.0.0"
         env["N8N_ENCRYPTION_KEY"] = encryptionKey
         env["DB_TYPE"] = "sqlite"
         env["NODE_OPTIONS"] = "--max-old-space-size=512" 
@@ -357,6 +312,14 @@ class ServerManager private constructor(
         // Timezone Sync
         val timeZone = java.util.TimeZone.getDefault().id
         env["GENERIC_TIMEZONE"] = timeZone
+        
+        // Android Optimization / Singularity
+        // Disable Task Runners (separate processes) to prevent port conflicts
+        
+        // New Method (v1.7 fix)
+        env["N8N_BLOCK_JS_EXECUTION_PROCESS"] = "true"
+        env["N8N_DISABLE_PYTHON_NODE"] = "true"
+        env["N8N_TASKS_EVALUATOR_PROCESS"] = "main"
         
         // Dynamic Dev Mode
         env["NODE_ENV"] = if (isSmartUpdateEnabled.value) "development" else "production"
@@ -435,6 +398,64 @@ class ServerManager private constructor(
             stopServer()
             delay(2000)
             startServer()
+        }
+    }
+
+    fun killExistingNodeProcesses() {
+        logToUi("Process Cleanup: Starting...")
+        try {
+            val runtime = Runtime.getRuntime()
+            var killedCount = 0
+
+            // Method A: Built-in shell commands (simple try)
+            val commands = listOf("pkill -9 node", "killall -9 node")
+            for (cmd in commands) {
+                try {
+                    val p = runtime.exec(arrayOf("/system/bin/sh", "-c", cmd))
+                    p.waitFor()
+                } catch (e: Exception) {
+                    // Ignore, move to next
+                }
+            }
+
+            // Method B: Robust PS Parsing (The real fix)
+            // ps -A outputs: USER PID PPID VSIZE RSS WCHAN PC NAME
+            try {
+                val p = runtime.exec(arrayOf("/system/bin/ps", "-A"))
+                val output = p.inputStream.bufferedReader().use { it.readText() }
+                p.waitFor()
+
+                // DEBUG: Log all node-like lines to see what we're missing
+                val nodeLines = output.lines().filter { it.contains("node") || it.contains("n8n") }
+                if (nodeLines.isNotEmpty()) {
+                     Log.d(TAG, "PS DEBUG: Found potential node processes:\n${nodeLines.joinToString("\n")}")
+                }
+
+                output.lines().forEach { line ->
+                    if (line.contains("runtime/bin/node") || (line.contains("node") && line.contains("n8n"))) {
+                        // Extract PID (2nd column usually, but split by whitespace handles it)
+                        val parts = line.trim().split("\\s+".toRegex())
+                        if (parts.size > 1) {
+                            val pidStr = parts[1]
+                            // Verify it's a number
+                            if (pidStr.all { it.isDigit() }) {
+                                Log.i(TAG, "Found zombie node process: $pidStr. Killing...")
+                                runtime.exec(arrayOf("kill", "-9", pidStr)).waitFor()
+                                killedCount++
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "PS parsing failed", e)
+            }
+            
+            logToUi("Process Cleanup: Killed $killedCount zombie processes.")
+            if (killedCount > 0) Thread.sleep(500) // Wait for OS to release ports
+
+        } catch (e: Exception) {
+            Log.e(TAG, "General cleanup failure", e)
+            logToUi("Process Cleanup: Failed (${e.message})")
         }
     }
 }

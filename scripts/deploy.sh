@@ -2,9 +2,9 @@
 set -e
 
 # Configuration
-DEFAULT_DEVICE="10.0.0.11:33731"
+DEFAULT_DEVICE="192.168.1.21:5555"
 WORK_DIR="$(pwd)"
-RUNTIME_ARTIFACT="n8n-android-arm64.tar.gz"
+# RUNTIME_ARTIFACT removed (Asset-based build)
 TARGET_CACHE_DIR="/storage/emulated/0/Android/data/com.n8nAndroidServer/cache"
 PACKAGE_NAME="com.n8nAndroidServer"
 
@@ -46,10 +46,6 @@ for arg in "$@"; do
         --runtime)
             DO_RUNTIME=true
             MODE_SPECIFIED=true
-            shift
-            ;;
-        --push|-p)
-            DO_PUSH=true
             shift
             ;;
         *)
@@ -116,39 +112,32 @@ echo "App stopped."
 
 
 if [ "$DO_RUNTIME" = true ]; then
-    echo "--- [3/6] Building Runtime Artifact ---"
+    echo "--- [3/6] Building Runtime Artifact (Asset-Based) ---"
     if [ -f "scripts/build_runtime.sh" ]; then
+        # This generates app/src/main/assets/core_runtime.tar.gz
         ./scripts/build_runtime.sh
     else
-        echo "Warning: scripts/build_runtime.sh not found. Skipping runtime build."
-    fi
-
-    echo "--- [4/6] Pushing Runtime to Device ---"
-    if [ -f "$RUNTIME_ARTIFACT" ]; then
-        echo "Pushing $RUNTIME_ARTIFACT to $TARGET_CACHE_DIR..."
-        
-        # Prepare path for push
-        LOCAL_FILE="$RUNTIME_ARTIFACT"
-        if [ "$IS_WSL" = true ] && [[ "$ADB_CMD" == *.exe ]]; then
-            # Convert linux path to windows path for adb.exe
-            LOCAL_FILE=$(wslpath -w "$RUNTIME_ARTIFACT")
-        fi
-
-        "$ADB_CMD" -s "$DEVICE" shell "mkdir -p $TARGET_CACHE_DIR" || true
-        "$ADB_CMD" -s "$DEVICE" push "$LOCAL_FILE" "$TARGET_CACHE_DIR/"
-        echo "Runtime pushed to cache. Use 'Smart Update' flag in App to install."
-    else
-        echo "Error: $RUNTIME_ARTIFACT not found. Build failed?"
+        echo "Error: scripts/build_runtime.sh not found."
         exit 1
     fi
 else
-    echo "--- Skipping Runtime Update ---"
+    echo "--- Skipping Runtime Build (Using existing assets) ---"
+fi
+
+# Note: We no longer push runtime to cache. 
+# The runtime is embedded in the APK assets. 
+# To update runtime, we must reinstall the APK.
+if [ "$DO_RUNTIME" = true ] && [ "$DO_APK" = false ]; then
+    echo "Notice: Runtime built, but --apk was not specified."
+    echo "        You must install the APK to deploy the new asset."
+    echo "        Enabling APK build/install automatically..."
+    DO_APK=true
 fi
 
 # 4 & 5. APK Ops
 if [ "$DO_APK" = true ]; then
     echo "--- [5/6] Building and Installing APK ---"
-    ./gradlew assembleDebug || { echo "Gradle build failed"; exit 1; }
+    ./gradlew clean assembleDebug || { echo "Gradle build failed"; exit 1; }
 
     echo "Installing APK..."
     APK_PATH="build/outputs/apk/debug/n8n-android-server-debug.apk"
@@ -173,17 +162,6 @@ if [ "$DO_APK" = true ]; then
     fi
 else
     echo "--- Skipping APK Update ---"
-fi
-
-# 6. Git Push
-if [ "$DO_PUSH" = true ]; then
-    echo "--- [6/6] Pushing to GitHub ---"
-    git add .
-    echo "Enter commit message:"
-    read -r COMMIT_MSG
-    git commit -m "$COMMIT_MSG"
-    git push
-    echo "Pushed to GitHub."
 fi
 
 echo "=============================================="

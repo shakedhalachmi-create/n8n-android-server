@@ -1,161 +1,155 @@
 package com.n8nAndroidServer.core
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import java.io.File
+import androidx.core.content.pm.PackageInfoCompat
 
 /**
- * Handles extraction and installation of the n8n runtime.
- * Implements atomic updates: Verify -> Wipe -> Extract -> Version.
+ * Handles extraction and installation of the n8n runtime from APK Assets.
+ * Implements atomic updates: Check Version -> Extract to Temp -> Atomic Rename.
  */
 object RuntimeInstaller {
     private const val TAG = "RuntimeInstaller"
+    private const val PREFS_NAME = "n8n_runtime_prefs"
+    private const val KEY_ASSET_VERSION = "last_asset_version_code"
+    private const val ASSET_FILENAME = "core_runtime.n8n"
 
     /**
-     * Extracts the given archive to the context's files dir (runtime/ folder).
-     * Performs SHA-256 verification and atomic cleanup.
-     * 
-     * @param archiveFile The tar.gz file to extract.
-     * @param expectedSha256 The expected SHA-256 hash.
-     * @param context App Context.
-     * @return true if successful.
+     * Installs the runtime from assets if not present or if app version changed.
+     * Thread-safe / Synchronized to prevent parallel extractions.
      */
-    fun installFromArchive(context: Context, archiveFile: File, expectedSha256: String, verifyIntegrity: Boolean = true): Boolean {
+    @Synchronized
+    fun installFromAssets(context: Context): Boolean {
         try {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            val currentVersionCode = PackageInfoCompat.getLongVersionCode(info)
+            val lastVersionCode = prefs.getLong(KEY_ASSET_VERSION, -1)
+            
             val runtimeDir = File(context.filesDir, "runtime")
-        
-        // 1. Verify Integrity (Optional)
-        if (verifyIntegrity) {
-            Log.i(TAG, "Verifying integrity of ${archiveFile.absolutePath}...")
-            val calculatedSha = RuntimeDownloader.calculateSha256(archiveFile)
-            if (!calculatedSha.equals(expectedSha256, ignoreCase = true)) {
-                Log.e(TAG, "Integrity Check Failed! Expected: $expectedSha256, Got: $calculatedSha")
+            val nodeBin = File(runtimeDir, "bin/node")
+            
+            // Check if update implies a re-install
+            val needsUpdate = (currentVersionCode > lastVersionCode)
+            val isMissing = !runtimeDir.exists() || !nodeBin.exists()
+            
+            if (!needsUpdate && !isMissing) {
+                Log.i(TAG, "Runtime up-to-date (v$lastVersionCode). Skipping extraction.")
+                return true
+            }
+            
+            Log.i(TAG, "Runtime update required. Current: $currentVersionCode, Last: $lastVersionCode, Missing: $isMissing")
+            
+            // 1. Prepare Paths
+            val cacheTar = File(context.cacheDir, "temp_runtime.tar.gz")
+            val runtimeTmp = File(context.filesDir, "runtime_tmp")
+            
+            // Cleanup previous attempts
+            if (runtimeTmp.exists()) {
+                runtimeTmp.deleteRecursively()
+            }
+            runtimeTmp.mkdirs()
+            
+            // 2. Asset Verification & Streaming
+            val assetList = context.assets.list("") ?: emptyArray()
+            Log.d(TAG, "Assets found in APK: ${assetList.joinToString()}")
+
+            if (!assetList.contains(ASSET_FILENAME)) {
+                Log.e(TAG, "CRITICAL: $ASSET_FILENAME MISSING from APK assets! Check build.gradle sourceSets.")
                 return false
             }
-            Log.i(TAG, "Integrity Verified.")
-        } else {
-             Log.i(TAG, "Integrity check skipped (trusted source).")
-        }
 
-        // 2. Atomic Wipe (Targeted Cleanup)
-        if (runtimeDir.exists()) {
-            Log.w(TAG, "Wiping old runtime at ${runtimeDir.absolutePath}...")
-            try {
-                val rmCmd = listOf("rm", "-rf", runtimeDir.absolutePath)
-                val process = Runtime.getRuntime().exec(rmCmd.toTypedArray())
-                val exitCode = process.waitFor()
-                if (exitCode != 0) {
-                     Log.e(TAG, "Shell wipe failed with code $exitCode. Attempting Kotlin fallback...")
-                     runtimeDir.deleteRecursively() // Fallback
+            Log.i(TAG, "Streaming $ASSET_FILENAME to cache...")
+            context.assets.open(ASSET_FILENAME).use { input ->
+                cacheTar.outputStream().use { output ->
+                    input.copyTo(output)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Shell wipe failed", e)
-                runtimeDir.deleteRecursively() // Fallback
             }
-        }
-        runtimeDir.mkdirs()
-        
-        // 3. Extract
-        Log.i(TAG, "Extracting to ${runtimeDir.absolutePath} using tar...")
-        try {
-            // Use native tar for symlink preservation
-            val command = listOf("tar", "-xzf", archiveFile.absolutePath, "--no-same-owner", "-C", runtimeDir.absolutePath)
-            val process = Runtime.getRuntime().exec(command.toTypedArray())
+            
+            // 3. Native Tar Extraction (Preserves Symlinks)
+            Log.i(TAG, "Extracting to ${runtimeTmp.absolutePath}...")
+            val tarCmd = listOf(
+                "tar",
+                "-xzf", cacheTar.absolutePath,
+                "--no-same-owner",
+                "-C", runtimeTmp.absolutePath
+            )
+            
+            val process = Runtime.getRuntime().exec(tarCmd.toTypedArray())
             val exitCode = process.waitFor()
+            
+            // Clean cache file immediately to save space
+            cacheTar.delete()
             
             if (exitCode != 0) {
                 val error = process.errorStream.bufferedReader().readText()
-                Log.e(TAG, "Tar extraction failed. Code: $exitCode, Error: $error")
-                // Cleanup partial extraction
-                runtimeDir.deleteRecursively()
+                Log.e(TAG, "Tar extraction failed! Code: $exitCode, Error: $error")
+                runtimeTmp.deleteRecursively()
                 return false
             }
             
-            Log.i(TAG, "Extraction successful.")
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Shell execution failed", e)
-            runtimeDir.deleteRecursively()
-            return false
-        }
-        
-        // 4. Set Permissions
-        // chmod -R 755 runtimeDir
-        try {
-            // General recursive chmod
-            val chmodCmd = listOf("chmod", "-R", "755", runtimeDir.absolutePath)
-            Runtime.getRuntime().exec(chmodCmd.toTypedArray()).waitFor()
-            
-            // Critical: Explicitly set +x for binaries via Kotlin File API
-            val binDir = File(runtimeDir, "bin")
-            val nodeFile = File(binDir, "node")
-            val startScript = File(binDir, "n8n-start.sh")
-
-            if (nodeFile.exists()) {
-                val success = nodeFile.setExecutable(true, false)
-                Log.i(TAG, "Permission Fix: node (+x) = $success")
-            }
-            if (startScript.exists()) {
-                val success = startScript.setExecutable(true, false)
-                Log.i(TAG, "Permission Fix: n8n-start.sh (+x) = $success")
+            // 4. Validation
+            val tmpNode = File(runtimeTmp, "bin/node")
+            if (!tmpNode.exists()) {
+                Log.e(TAG, "Extraction validation failed: bin/node missing!")
+                runtimeTmp.deleteRecursively()
+                return false
             }
             
-            // Fallback: Targeted chmod for strict environments
-            // Sometimes standard File.setExecutable fails on internal storage mounts
-            Runtime.getRuntime().exec("chmod 755 ${nodeFile.absolutePath}").waitFor()
-            Runtime.getRuntime().exec("chmod 755 ${startScript.absolutePath}").waitFor()
-            
-        } catch (e: Exception) {
-            Log.w(TAG, "chmod warning: ${e.message}")
-        }
-
-        // 5. Verify & Stamp Version
-        val nodeBin = File(runtimeDir, "bin/node")
-        if (nodeBin.exists()) {
-             Log.i(TAG, "Runtime verified. Stamping version...")
-             val versionFile = File(runtimeDir, "version.txt")
-             versionFile.writeText(expectedSha256)
-             
-             // NOTE: We DO NOT delete the archiveFile. Persistent Cache logic.
-             Log.i(TAG, "Installation Complete. Archive preserved in cache.")
-            return true
-        } else {
-            Log.e(TAG, "Node binary not found after extraction.")
-            // Cleanup
-            try {
+            // 5. Atomic Rename (The Swap)
+            if (runtimeDir.exists()) {
+                Log.i(TAG, "Removing old runtime...")
                 runtimeDir.deleteRecursively()
-            } catch (ignore: Exception) {}
+            }
+            
+            if (runtimeTmp.renameTo(runtimeDir)) {
+                Log.i(TAG, "Atomic rename successful.")
+            } else {
+                Log.e(TAG, "Atomic rename failed! Attempting manual move...")
+                // Fallback if renaming across mount points fails (unlikely inside filesDir)
+                // But just in case:
+                // runtimeTmp.copyRecursively(runtimeDir, true)
+                // runtimeTmp.deleteRecursively()
+                return false
+            }
+            
+            // 6. Permissions (W^X Check)
+            setExecutablePermissions(runtimeDir)
+            
+            // 7. Update State
+            prefs.edit().putLong(KEY_ASSET_VERSION, currentVersionCode).apply()
+            Log.i(TAG, "Runtime v$currentVersionCode installed successfully.")
+            return true
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Critical installation failure", e)
             return false
         }
-    } catch (e: Throwable) {
-        Log.e(TAG, "Critical installation failure", e)
-        return false
     }
-}
-
-    /**
-     * Checks if the runtime is currently installed and returns its version hash.
-     * @return The installed SHA-256 hash or null if not installed/corrupt.
-     */
-    fun getInstalledHash(context: Context): String? {
-        val runtimeDir = File(context.filesDir, "runtime")
-        val nodeBin = File(runtimeDir, "bin/node")
-        val versionFile = File(runtimeDir, "version.txt")
-        
-        if (!nodeBin.exists()) return null
-        if (!versionFile.exists()) return null
-        
-        return try {
-            versionFile.readText().trim()
+    
+    private fun setExecutablePermissions(runtimeDir: File) {
+        try {
+            // Bulk chmod
+            Runtime.getRuntime().exec("chmod -R 755 ${runtimeDir.absolutePath}").waitFor()
+            
+            // Explicit +x for binaries
+            val binDir = File(runtimeDir, "bin")
+            File(binDir, "node").setExecutable(true, false)
+            File(binDir, "n8n-start.sh").setExecutable(true, false)
         } catch (e: Exception) {
-            null
+            Log.w(TAG, "Failed to set explicit permissions: ${e.message}")
         }
     }
-
-    /**
-     * Basic availability check.
-     */
+    
+    fun getRuntimePath(context: Context): File {
+        return File(context.filesDir, "runtime")
+    }
+    
     fun isRuntimeAvailable(context: Context): Boolean {
-        return getInstalledHash(context) != null
+         val node = File(getRuntimePath(context), "bin/node")
+         return node.exists() && node.canExecute()
     }
 }
+

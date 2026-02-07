@@ -19,12 +19,27 @@ android {
             abiFilters.add("arm64-v8a")
         }
     }
+
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs("src/main/assets")
+        }
+    }
+
+    aaptOptions {
+        noCompress("n8n")
+    }
+
     lint {
         abortOnError = false
         checkReleaseBuilds = false
         disable.add("ExpiredTargetSdkVersion")
     }
     buildTypes {
+        getByName("debug") {
+            isShrinkResources = false
+            isMinifyEnabled = false
+        }
         getByName("release") {
             signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
