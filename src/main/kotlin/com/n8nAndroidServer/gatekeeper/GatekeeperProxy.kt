@@ -18,7 +18,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.*
 
 /**
- * Gatekeeper Proxy - Reverse proxy from 0.0.0.0:5678 to 127.0.0.1:5679.
+ * Gatekeeper Proxy - Reverse proxy from 0.0.0.0:5678 to 127.0.0.1:5681.
  * 
  * Key Features:
  * - IP-based access control via WhitelistDatabase
